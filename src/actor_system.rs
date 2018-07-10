@@ -1,12 +1,12 @@
+use super::id::{MachineID, RawID, TypedID};
+use super::inbox::{DispatchablePacket, Inbox};
+use super::messaging::{Fate, Message, Packet};
+use super::networking::Networking;
+use super::swarm::Swarm;
+use super::type_registry::{ShortTypeId, TypeRegistry};
 use compact::Compact;
 use std::mem::size_of;
-use super::messaging::{Message, Packet, Fate};
-use super::inbox::{Inbox, DispatchablePacket};
-use super::id::{RawID, TypedID, MachineID};
-use super::type_registry::{ShortTypeId, TypeRegistry};
-use super::swarm::Swarm;
-use super::networking::Networking;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Trait that allows dynamically sized `Actor` instances to provide
 /// a "typical size" hint to optimize their storage in a `Swarm`
@@ -172,9 +172,11 @@ impl ActorSystem {
     ) {
         let actor_id = self.actor_registry.get::<A>();
         let message_id = self.message_registry.get_or_register::<M>();
-        // println!("adding to {} inbox for {}",
-        //          unsafe { ::std::intrinsics::type_name::<A>() },
-        //          unsafe { ::std::intrinsics::type_name::<M>() });
+        // println!(
+        //     "adding to {} inbox for {}",
+        //     unsafe { ::std::intrinsics::type_name::<A>() },
+        //     unsafe { ::std::intrinsics::type_name::<M>() }
+        // );
 
         #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
         let swarm_ptr =
@@ -183,6 +185,12 @@ impl ActorSystem {
         self.dispatchers[actor_id.as_usize()][message_id.as_usize()] = Some(Dispatcher {
             function: Box::new(move |packet_ptr: *const (), world: &mut World| unsafe {
                 let packet = &*(packet_ptr as *const Packet<M>);
+
+                // println!(
+                //     "{} Handling packet with message {}",
+                //     ::std::intrinsics::type_name::<A>(),
+                //     ::std::intrinsics::type_name::<M>()
+                // );
 
                 (*swarm_ptr).dispatch_packet(packet, &handler, world);
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::intrinsics::{type_id, type_name};
 use std::convert::From;
+use std::intrinsics::{type_id, type_name};
 use std::num::NonZeroU16;
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]

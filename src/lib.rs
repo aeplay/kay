@@ -21,21 +21,26 @@ extern crate chunky;
 extern crate compact;
 #[macro_use]
 extern crate compact_macros;
-extern crate core;
 extern crate byteorder;
+extern crate core;
+#[cfg(feature = "browser")]
+extern crate stdweb;
+#[cfg(feature = "server")]
+extern crate tungstenite;
+extern crate url;
 
+mod actor_system;
+mod external;
+mod id;
 mod inbox;
+mod messaging;
+mod networking;
 mod slot_map;
 mod swarm;
-mod messaging;
 mod type_registry;
-mod id;
-mod actor_system;
-mod networking;
-mod external;
 
-pub use self::messaging::{Message, Packet, Fate};
-pub use self::id::{RawID, TypedID, MachineID};
-pub use self::actor_system::{Actor, ActorSystem, World, TraitIDFrom};
-pub use self::networking::Networking;
+pub use self::actor_system::{Actor, ActorSystem, TraitIDFrom, World};
 pub use self::external::External;
+pub use self::id::{MachineID, RawID, TypedID};
+pub use self::messaging::{Fate, Message, Packet};
+pub use self::networking::Networking;

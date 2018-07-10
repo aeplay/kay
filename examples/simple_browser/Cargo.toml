@@ -1,0 +1,9 @@
+[package]
+name = "kay_simple_example_browser"
+version = "0.1.0"
+authors = ["Anselm Eickhoff <anselm.eickhoff@gmail.com>"]
+
+[dependencies]
+stdweb = "0.4.7"
+kay = { path = "../..", default-features = false, features = ["browser"] }
+kay_simple_example_common = { path = "../simple_common", default-features = false, features = ["browser"] }

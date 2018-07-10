@@ -1,10 +1,10 @@
 //! Tools for dealing with large amounts of identical actors
-use compact::Compact;
+use super::actor_system::{Actor, World};
 use super::chunky;
+use super::id::{broadcast_instance_id, RawID, TypedID};
+use super::messaging::{Fate, Message, Packet};
 use super::slot_map::{SlotIndices, SlotMap};
-use super::messaging::{Message, Packet, Fate};
-use super::actor_system::{World, Actor};
-use super::id::{TypedID, RawID, broadcast_instance_id};
+use compact::Compact;
 use std::marker::PhantomData;
 
 /// A container-like actor, housing many instances of identical behaviour.

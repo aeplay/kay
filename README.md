@@ -10,6 +10,7 @@ kay can be *transparently and trivially* scaled onto...
 
 - [ ] multiple cores
 - [X] multiple networked computers
+- [X] browser clients with `wasm` and `cargo web`
 
 It offers...
 

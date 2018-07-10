@@ -1,13 +1,26 @@
-use std::net::{SocketAddr, TcpStream, TcpListener};
-use std::io::{Read, Write, ErrorKind, BufReader};
+use super::id::{broadcast_machine_id, MachineID, RawID};
+use super::inbox::Inbox;
+use super::messaging::{Message, Packet};
+use super::type_registry::ShortTypeId;
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use compact::Compact;
+#[cfg(feature = "server")]
+use std::net::{TcpListener, TcpStream};
+#[cfg(feature = "server")]
 use std::thread;
 use std::time::Duration;
-use super::inbox::Inbox;
-use super::id::{RawID, broadcast_machine_id, MachineID};
-use super::type_registry::ShortTypeId;
-use super::messaging::{Message, Packet};
-use byteorder::{LittleEndian, WriteBytesExt, ByteOrder};
-use compact::Compact;
+#[cfg(feature = "browser")]
+use stdweb::traits::{IEventTarget, IMessageEvent};
+#[cfg(feature = "browser")]
+use stdweb::web::{SocketBinaryType, SocketReadyState, TypedArray, WebSocket};
+#[cfg(feature = "server")]
+use tungstenite::util::NonBlockingError;
+#[cfg(feature = "server")]
+use tungstenite::{
+    accept as websocket_accept, client as websocket_client, Message as WebSocketMessage, WebSocket,
+};
+#[cfg(feature = "server")]
+use url::Url;
 
 /// Represents all networking environment and networking state
 /// of an `ActorSystem`
@@ -17,14 +30,14 @@ pub struct Networking {
     /// The current network turn this machine is in. Used to keep track
     /// if this machine lags behind or runs fast compared to its peers
     pub n_turns: usize,
-    network: Vec<SocketAddr>,
+    network: Vec<&'static str>,
     network_connections: Vec<Option<Connection>>,
 }
 
 impl Networking {
     /// Create network environment based on this machines id/index
     /// and all peer addresses (including this machine)
-    pub fn new(machine_id: u8, network: Vec<SocketAddr>) -> Networking {
+    pub fn new(machine_id: u8, network: Vec<&'static str>) -> Networking {
         Networking {
             machine_id: MachineID(machine_id),
             n_turns: 0,
@@ -33,6 +46,7 @@ impl Networking {
         }
     }
 
+    #[cfg(feature = "server")]
     /// Connect to all peers in the network
     pub fn connect(&mut self) {
         let listener = TcpListener::bind(self.network[self.machine_id.0 as usize]).unwrap();
@@ -40,8 +54,9 @@ impl Networking {
         // first wait for all smaller machine_ids to connect
         for (machine_id, _address) in self.network.iter().enumerate() {
             if machine_id < self.machine_id.0 as usize {
-                self.network_connections[machine_id] =
-                    Some(Connection::new(listener.accept().unwrap().0))
+                let stream = listener.accept().unwrap().0;
+                let mut websocket = websocket_accept(stream).unwrap();
+                self.network_connections[machine_id] = Some(Connection::new(websocket))
             }
         }
 
@@ -50,12 +65,27 @@ impl Networking {
         // then try to connecto to all larger machine_ids
         for (machine_id, address) in self.network.iter().enumerate() {
             if machine_id > self.machine_id.0 as usize {
-                self.network_connections[machine_id] =
-                    Some(Connection::new(TcpStream::connect(address).unwrap()))
+                let stream = TcpStream::connect(address).unwrap();
+                let websocket =
+                    websocket_client(Url::parse(&format!("ws://{}", address)).unwrap(), stream)
+                        .unwrap()
+                        .0;
+                self.network_connections[machine_id] = Some(Connection::new(websocket))
             }
         }
 
         println!("All mapped");
+    }
+
+    #[cfg(feature = "browser")]
+    /// Connect to all peers in the network
+    pub fn connect(&mut self) {
+        for (machine_id, address) in self.network.iter().enumerate() {
+            if machine_id != self.machine_id.0 as usize {
+                let websocket = WebSocket::new(&format!("ws://{}", address)).unwrap();
+                self.network_connections[machine_id] = Some(Connection::new(websocket));
+            }
+        }
     }
 
     /// Finish the current networking turn and wait for peers which lag behind
@@ -85,6 +115,7 @@ impl Networking {
             self.send_and_receive(inboxes);
             self.send_and_receive(inboxes);
             self.send_and_receive(inboxes);
+            #[cfg(feature = "server")]
             ::std::thread::sleep(duration);
         };
 
@@ -92,12 +123,13 @@ impl Networking {
 
         for maybe_connection in &mut self.network_connections {
             if let Some(ref mut connection) = *maybe_connection {
-                // write turn end, use 0 to distinguish from actual packet
-                connection.write_queue.write_u64::<LittleEndian>(0).unwrap();
-                connection
-                    .write_queue
-                    .write_u64::<LittleEndian>(self.n_turns as u64)
-                    .unwrap();
+                // write turn end, use 0 as "message type" to distinguish from actual packet
+                let mut data = Vec::<u8>::with_capacity(
+                    ::std::mem::size_of::<ShortTypeId>() + ::std::mem::size_of::<u32>(),
+                );
+                data.write_u16::<LittleEndian>(0).unwrap();
+                data.write_u32::<LittleEndian>(self.n_turns as u32).unwrap();
+                connection.enqueue(data);
                 connection.n_turns_since_own_turn = 0;
             }
         }
@@ -108,7 +140,7 @@ impl Networking {
     pub fn send_and_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
         for maybe_connection in &mut self.network_connections {
             if let Some(ref mut connection) = *maybe_connection {
-                connection.try_send();
+                connection.try_send_pending();
                 connection.try_receive(inboxes)
             }
         }
@@ -124,7 +156,7 @@ impl Networking {
         let total_size = ::std::mem::size_of::<ShortTypeId>() + packet_size;
         let machine_id = packet.recipient_id.machine;
 
-        let mut connections: Vec<&mut Connection> = if machine_id == broadcast_machine_id() {
+        let connections: Vec<&mut Connection> = if machine_id == broadcast_machine_id() {
             self.network_connections
                 .iter_mut()
                 .filter_map(|maybe_connection| maybe_connection.as_mut())
@@ -139,44 +171,25 @@ impl Networking {
             ]
         };
 
-        let first_connection = connections.remove(0);
-        first_connection
-            .write_queue
-            .reserve(::std::mem::size_of::<u64>() + total_size);
+        for connection in connections {
+            let mut data = Vec::<u8>::with_capacity(total_size);
+            data.write_u16::<LittleEndian>(message_type_id.into())
+                .unwrap();
+            let packet_pos = data.len();
+            data.resize(packet_pos + packet_size, 0);
 
-        let before_everything = first_connection.write_queue.len();
+            unsafe {
+                // store packet compactly in write queue
+                Compact::compact_behind(
+                    &mut packet,
+                    &mut data[packet_pos] as *mut u8 as *mut Packet<M>,
+                );
+            }
 
-        // write total size (message type + packet)
-        first_connection
-            .write_queue
-            .write_u64::<LittleEndian>(total_size as u64)
-            .unwrap();
-
-        // write message type
-        first_connection
-            .write_queue
-            .write_u16::<LittleEndian>(message_type_id.into())
-            .unwrap();
-
-        let packet_pos = first_connection.write_queue.len();
-        first_connection
-            .write_queue
-            .resize(packet_pos + packet_size, 0);
-
-        unsafe {
-            // store packet compactly in write queue
-            Compact::compact_behind(
-                &mut packet,
-                &mut first_connection.write_queue[packet_pos] as *mut u8 as *mut Packet<M>,
-            );
-            ::std::mem::forget(packet);
+            connection.enqueue(data);
         }
 
-        for rest_connection in connections {
-            rest_connection
-                .write_queue
-                .extend_from_slice(&first_connection.write_queue[before_everything..]);
-        }
+        ::std::mem::forget(packet);
     }
 
     /// Return a debug message containing the current local view of
@@ -201,158 +214,172 @@ impl Networking {
     }
 }
 
+#[cfg(feature = "server")]
 pub struct Connection {
     n_turns: usize,
     n_turns_since_own_turn: usize,
-    stream: TcpStream,
-    read_stream: BufReader<TcpStream>,
-    write_queue: Vec<u8>,
-    write_queue_pos: usize,
-    reading_state: ReadingState,
+    websocket: WebSocket<TcpStream>,
 }
 
+#[cfg(feature = "server")]
 impl Connection {
-    pub fn new(stream: TcpStream) -> Connection {
-        stream.set_nonblocking(true).unwrap();
-        stream.set_read_timeout(None).unwrap();
-        stream.set_write_timeout(None).unwrap();
-        stream.set_nodelay(true).unwrap();
+    pub fn new(mut websocket: WebSocket<TcpStream>) -> Connection {
+        {
+            let tcp_socket = websocket.get_mut();
+            tcp_socket.set_nonblocking(true).unwrap();
+            tcp_socket.set_read_timeout(None).unwrap();
+            tcp_socket.set_write_timeout(None).unwrap();
+            tcp_socket.set_nodelay(true).unwrap();
+        }
         Connection {
-            read_stream: BufReader::with_capacity(1024 * 1024, stream.try_clone().unwrap()),
-            stream,
             n_turns: 0,
             n_turns_since_own_turn: 0,
-            write_queue: Vec::with_capacity(0),
-            write_queue_pos: 0,
-            reading_state: ReadingState::AwaitingLength(0, [0; 8]),
+            websocket,
         }
     }
-}
 
-pub enum ReadingState {
-    AwaitingLength(usize, [u8; 8]),
-    AwaitingTurnEnd(usize, [u8; 8]),
-    AwaitingPacket(usize, Vec<u8>),
-}
+    pub fn enqueue(&mut self, message: Vec<u8>) {
+        self.websocket
+            .write_message(WebSocketMessage::binary(message))
+            .unwrap();
+    }
 
-impl Connection {
-    pub fn try_send(&mut self) {
-        loop {
-            match self.stream.write(&self.write_queue[self.write_queue_pos..]) {
-                Ok(bytes_written) => {
-                    if bytes_written > 0 {
-                        self.write_queue_pos += bytes_written;
-                        let cutoff = self.write_queue.len() * 2 / 3;
-                        if cutoff > 1000 && self.write_queue_pos >= cutoff {
-                            self.write_queue.drain(..self.write_queue_pos);
-                            self.write_queue_pos = 0;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
-                Err(e) => panic!("{}", e),
-            }
+    pub fn try_send_pending(&mut self) {
+        match self.websocket.write_pending() {
+            Ok(()) => {}
+            Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                panic!("{}", real_err)
+            },
         }
     }
 
     pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
         loop {
-            let (blocked, maybe_new_state) = match self.reading_state {
-                ReadingState::AwaitingLength(ref mut bytes_read, ref mut length_buffer) => {
-                    match self.read_stream.read(&mut length_buffer[*bytes_read..]) {
-                        Ok(additional_bytes_read) => {
-                            *bytes_read += additional_bytes_read;
-                            if *bytes_read == length_buffer.len() {
-                                let length = LittleEndian::read_u64(length_buffer) as usize;
-                                if length > 0 {
-                                    // println!("Expecting package of length {}", length);
-                                    (
-                                        false,
-                                        Some(ReadingState::AwaitingPacket(0, vec![0; length])),
-                                    )
-                                } else {
-                                    // special marker of length == 0 means turn end comes next
-                                    (false, Some(ReadingState::AwaitingTurnEnd(0, [0; 8])))
-                                }
-                            } else {
-                                (false, None)
-                            }
-                        }
-                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => (true, None),
-                        Err(e) => panic!("{}", e),
-                    }
-                }
-                ReadingState::AwaitingPacket(ref mut bytes_read, ref mut packet_buffer) => {
-                    match self.read_stream.read(&mut packet_buffer[*bytes_read..]) {
-                        Ok(additional_bytes_read) => {
-                            *bytes_read += additional_bytes_read;
-                            if *bytes_read == packet_buffer.len() {
-                                // let message_type_id =
-                                //               (&buf[0] as *const u8) as *const ShortTypeId;
-                                #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
-                                let recipient_type_id = (&packet_buffer
-                                    [::std::mem::size_of::<ShortTypeId>()]
-                                    as *const u8)
-                                    as *const RawID;
-
-                                unsafe {
-                                    // println!("Receiving packet of size {}, msg {} for actor {}",
-                                    //              length, (*message_type_id).as_usize(),
-                                    //              (*recipient_type_id).type_id.as_usize());
-                                    if let Some(ref mut inbox) =
-                                        inboxes[(*recipient_type_id).type_id.as_usize()]
-                                    {
-                                        inbox.put_raw(packet_buffer);
-                                    } else {
-                                        panic!(
-                                            "No inbox for {:?} (coming from network)",
-                                            (*recipient_type_id).type_id.as_usize()
-                                        )
-                                    }
-                                }
-
-                                (false, Some(ReadingState::AwaitingLength(0, [0; 8])))
-                            } else {
-                                (false, None)
-                            }
-                        }
-                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => (true, None),
-                        Err(e) => panic!("{}", e),
-                    }
-                }
-                ReadingState::AwaitingTurnEnd(ref mut bytes_read, ref mut n_turns_buffer) => {
-                    match self.read_stream.read(&mut n_turns_buffer[*bytes_read..]) {
-                        Ok(additional_bytes_read) => {
-                            *bytes_read += additional_bytes_read;
-                            if *bytes_read == n_turns_buffer.len() {
-                                self.n_turns = LittleEndian::read_u64(n_turns_buffer) as usize;
-                                self.n_turns_since_own_turn += 1;
-
-                                // pretend that we're blocked so we only ever process all
-                                // messages of 5 incoming turns within one of our own turns,
-                                // applying backpressure
-                                let block = self.n_turns_since_own_turn >= 5;
-
-                                (block, Some(ReadingState::AwaitingLength(0, [0; 8])))
-                            } else {
-                                (false, None)
-                            }
-                        }
-                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => (true, None),
-                        Err(e) => panic!("{}", e),
-                    }
-                }
+            let blocked = match self.websocket.read_message() {
+                Ok(WebSocketMessage::Binary(data)) => dispatch_message(
+                    data,
+                    inboxes,
+                    &mut self.n_turns,
+                    &mut self.n_turns_since_own_turn,
+                ),
+                Ok(other_message) => panic!("Got a non binary message: {:?}", other_message),
+                Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                    panic!("{}", real_err)
+                } else {
+                    true
+                },
             };
-
-            if let Some(new_state) = maybe_new_state {
-                self.reading_state = new_state;
-            }
 
             if blocked {
                 break;
             }
+        }
+    }
+}
+
+fn dispatch_message(
+    data: Vec<u8>,
+    inboxes: &mut [Option<Inbox>],
+    n_turns: &mut usize,
+    n_turns_since_own_turn: &mut usize,
+) -> bool {
+    if data[0] == 0 && data[1] == 0 {
+        // this is actually a turn start
+        *n_turns = LittleEndian::read_u32(&data[::std::mem::size_of::<ShortTypeId>()..]) as usize;
+        *n_turns_since_own_turn += 1;
+
+        // pretend that we're blocked so we only ever process all
+        // messages of 5 incoming turns within one of our own turns,
+        // applying backpressure
+        *n_turns_since_own_turn >= 5
+    } else {
+        let recipient_id =
+            (&data[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
+
+        unsafe {
+            // println!("Receiving packet of msg {} for actor {:?}",
+            //              (*message_type_id).as_usize(),
+            //              (*recipient_id));
+            if let Some(ref mut inbox) = inboxes[(*recipient_id).type_id.as_usize()] {
+                inbox.put_raw(&data);
+            } else {
+                panic!(
+                    "No inbox for {:?} (coming from network)",
+                    (*recipient_id).type_id.as_usize()
+                )
+            }
+        }
+
+        false
+    }
+}
+
+#[cfg(feature = "browser")]
+use std::cell::RefCell;
+#[cfg(feature = "browser")]
+use std::collections::VecDeque;
+#[cfg(feature = "browser")]
+use std::rc::Rc;
+
+#[cfg(feature = "browser")]
+pub struct Connection {
+    n_turns: usize,
+    n_turns_since_own_turn: usize,
+    websocket: WebSocket,
+    in_queue: Rc<RefCell<VecDeque<Vec<u8>>>>,
+    before_ready_queue: Vec<Vec<u8>>,
+}
+
+#[cfg(feature = "browser")]
+use stdweb::web::event::SocketMessageEvent;
+
+#[cfg(feature = "browser")]
+impl Connection {
+    pub fn new(websocket: WebSocket) -> Connection {
+        let in_queue = Rc::new(RefCell::new(VecDeque::new()));
+        let in_queue_for_listener = in_queue.clone();
+
+        websocket.set_binary_type(SocketBinaryType::ArrayBuffer);
+        websocket.add_event_listener(move |event: SocketMessageEvent| {
+            in_queue_for_listener.borrow_mut().push_back({
+                let typed_array: TypedArray<u8> = event.data().into_array_buffer().unwrap().into();
+                typed_array.to_vec()
+            })
+        });
+
+        Connection {
+            n_turns: 0,
+            n_turns_since_own_turn: 0,
+            websocket,
+            in_queue,
+            before_ready_queue: Vec::new(),
+        }
+    }
+
+    pub fn enqueue(&mut self, message: Vec<u8>) {
+        if self.websocket.ready_state() == SocketReadyState::Open {
+            for earlier_message in self.before_ready_queue.drain(..) {
+                self.websocket.send_bytes(&earlier_message).unwrap()
+            }
+            self.websocket.send_bytes(&message).unwrap();
+        } else {
+            self.before_ready_queue.push(message);
+        }
+    }
+
+    pub fn try_send_pending(&mut self) {
+        // nothing to do here
+    }
+
+    pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
+        let mut in_queue = self.in_queue.borrow_mut();
+        for message in in_queue.drain(..) {
+            dispatch_message(
+                message,
+                inboxes,
+                &mut self.n_turns,
+                &mut self.n_turns_since_own_turn,
+            );
         }
     }
 }

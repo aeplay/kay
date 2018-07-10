@@ -1,0 +1,19 @@
+[package]
+name = "kay_simple_example_common"
+version = "0.1.0"
+authors = ["Anselm Eickhoff <anselm.eickhoff@gmail.com>"]
+build = "./build.rs"
+
+[dependencies]
+kay = { path = "../..", default-features = false }
+compact = "0.1.0"
+compact_macros = "0.1.0"
+stdweb = {version = "0.4.7", optional = true}
+
+[build-dependencies]
+kay_codegen = "0.1.0"
+
+[features]
+default = ["server"]
+server = ["kay/server"]
+browser = ["stdweb", "kay/browser"]

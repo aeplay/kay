@@ -1,5 +1,5 @@
-use super::id::RawID;
 use super::compact::Compact;
+use super::id::RawID;
 
 /// Return type of message handling functions, signifying if
 /// an `Actor`/`Actor` should live on after receiving a certain message type.

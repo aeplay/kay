@@ -1,6 +1,6 @@
-use super::compact::Compact;
 use super::chunky;
-use super::messaging::{Packet, Message};
+use super::compact::Compact;
+use super::messaging::{Message, Packet};
 use super::type_registry::{ShortTypeId, TypeRegistry};
 
 pub struct Inbox {

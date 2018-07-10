@@ -1,0 +1,8 @@
+[package]
+name = "kay_simple_example_server"
+version = "0.1.0"
+authors = ["Anselm Eickhoff <anselm.eickhoff@gmail.com>"]
+
+[dependencies]
+kay = { path = "../.." }
+kay_simple_example_common = { path = "../simple_common" }

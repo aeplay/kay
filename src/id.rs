@@ -1,10 +1,12 @@
 use super::type_registry::ShortTypeId;
 
 /// Identifies a machine in the network
+#[cfg_attr(feature = "serde-serialization", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
 pub struct MachineID(pub u8);
 
 /// A `RawID` uniquely identifies an `Actor`, or even a `Actor` within a `Swarm`
+#[cfg_attr(feature = "serde-serialization", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RawID {
     /// An ID for the type of the identified `Actor`, used to dispatch messages

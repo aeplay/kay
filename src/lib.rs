@@ -28,6 +28,11 @@ extern crate stdweb;
 #[cfg(feature = "server")]
 extern crate tungstenite;
 extern crate url;
+#[cfg(feature = "serde-serialization")]
+#[macro_use]
+extern crate serde_derive;
+#[cfg(feature = "serde-serialization")]
+extern crate serde;
 
 mod actor_system;
 mod external;

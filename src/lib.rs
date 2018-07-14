@@ -24,6 +24,7 @@ extern crate compact_macros;
 extern crate byteorder;
 extern crate core;
 #[cfg(feature = "browser")]
+#[macro_use]
 extern crate stdweb;
 #[cfg(feature = "server")]
 extern crate tungstenite;

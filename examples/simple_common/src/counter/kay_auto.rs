@@ -1,4 +1,5 @@
-# ! [ doc = r" This is all auto-generated. Do not touch." ]#[allow(unused_imports)]
+#![doc = r" This is all auto-generated. Do not touch."]
+#[allow(unused_imports)]
 use super::*;
 #[allow(unused_imports)]
 use kay::{Actor, ActorSystem, Fate, RawID, TraitIDFrom, TypedID};
@@ -16,16 +17,16 @@ impl TypedID for CounterListenerID {
 }
 impl<A: Actor + CounterListener> TraitIDFrom<A> for CounterListenerID {}
 impl CounterListenerID {
-    pub fn on_count_change(&self, new_count: u32, world: &mut World) {
+    pub fn on_count_change(&self, new_count: u32, history: CVec<u32>, world: &mut World) {
         world.send(
             self.as_raw(),
-            MSG_CounterListener_on_count_change(new_count),
+            MSG_CounterListener_on_count_change(new_count, history),
         );
     }
     pub fn register_handlers<A: Actor + CounterListener>(system: &mut ActorSystem) {
         system.add_handler::<A, _, _>(
-            |&MSG_CounterListener_on_count_change(new_count), instance, world| {
-                instance.on_count_change(new_count, world);
+            |&MSG_CounterListener_on_count_change(new_count, ref history), instance, world| {
+                instance.on_count_change(new_count, history, world);
                 Fate::Live
             },
             false,
@@ -34,7 +35,8 @@ impl CounterListenerID {
 }
 #[allow(non_camel_case_types)]
 #[derive(Compact, Clone)]
-struct MSG_CounterListener_on_count_change(pub u32);
+#[repr(C)]
+struct MSG_CounterListener_on_count_change(pub u32, pub CVec<u32>);
 impl Actor for Counter {
     type ID = CounterID;
     fn id(&self) -> Self::ID {

@@ -51,9 +51,9 @@ impl Networking {
     pub fn connect(&mut self) {
         let listener = TcpListener::bind(self.network[self.machine_id.0 as usize]).unwrap();
 
-        // first wait for all smaller machine_ids to connect
+        // first wait for all larger machine_ids to connect
         for (machine_id, _address) in self.network.iter().enumerate() {
-            if machine_id < self.machine_id.0 as usize {
+            if machine_id > self.machine_id.0 as usize {
                 let stream = listener.accept().unwrap().0;
                 let mut websocket = websocket_accept(stream).unwrap();
                 self.network_connections[machine_id] = Some(Connection::new(websocket))
@@ -62,9 +62,9 @@ impl Networking {
 
         thread::sleep(Duration::from_secs(2));
 
-        // then try to connecto to all larger machine_ids
+        // then try to connecto to all smaller machine_ids
         for (machine_id, address) in self.network.iter().enumerate() {
-            if machine_id > self.machine_id.0 as usize {
+            if machine_id < self.machine_id.0 as usize {
                 let stream = TcpStream::connect(address).unwrap();
                 let websocket =
                     websocket_client(Url::parse(&format!("ws://{}", address)).unwrap(), stream)
@@ -141,7 +141,7 @@ impl Networking {
         for maybe_connection in &mut self.network_connections {
             if let Some(ref mut connection) = *maybe_connection {
                 connection.try_send_pending();
-                connection.try_receive(inboxes)
+                connection.try_receive(inboxes);
             }
         }
     }
@@ -177,7 +177,7 @@ impl Networking {
                 .unwrap();
             let packet_pos = data.len();
             data.resize(packet_pos + packet_size, 0);
-
+            
             unsafe {
                 // store packet compactly in write queue
                 Compact::compact_behind(
@@ -239,6 +239,12 @@ impl Connection {
     }
 
     pub fn enqueue(&mut self, message: Vec<u8>) {
+        let recipient_id =
+            (&message[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
+        // println!(
+        //     "Enqueueing message recipient: {:?}, data: {:?}",
+        //     unsafe{(*recipient_id)}, message
+        // );
         self.websocket
             .write_message(WebSocketMessage::binary(message))
             .unwrap();
@@ -297,12 +303,22 @@ fn dispatch_message(
             (&data[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
 
         unsafe {
-            // println!("Receiving packet of msg {} for actor {:?}",
-            //              (*message_type_id).as_usize(),
-            //              (*recipient_id));
+            // #[cfg(feature = "browser")]
+            // {
+            //     let debugmsg = format!(
+            //         "Receiving packet for actor {:?}. Data: {:?}",
+            //         (*recipient_id),
+            //         data
+            //     );
+            //     console!(log, debugmsg);
+            // }
             if let Some(ref mut inbox) = inboxes[(*recipient_id).type_id.as_usize()] {
                 inbox.put_raw(&data);
             } else {
+                // #[cfg(feature = "browser")]
+                // {
+                //     console!(error, "Yeah that didn't work (no inbox)")
+                // }
                 panic!(
                     "No inbox for {:?} (coming from network)",
                     (*recipient_id).type_id.as_usize()
@@ -372,14 +388,20 @@ impl Connection {
     }
 
     pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
-        let mut in_queue = self.in_queue.borrow_mut();
-        for message in in_queue.drain(..) {
-            dispatch_message(
-                message,
-                inboxes,
-                &mut self.n_turns,
-                &mut self.n_turns_since_own_turn,
-            );
+        if let Ok(mut in_queue) = self.in_queue.try_borrow_mut() {
+            //console!(log, "Before drain!");
+            for message in in_queue.drain(..) {
+                //console!(log, "Before dispatch!");
+                dispatch_message(
+                    message,
+                    inboxes,
+                    &mut self.n_turns,
+                    &mut self.n_turns_since_own_turn,
+                );
+                //console!(log, "After dispatch!")
+            }
+        } else {
+            //console!(log, "Cannot borrow inqueue mutably!")
         }
     }
 }

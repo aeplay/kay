@@ -21,6 +21,7 @@ impl<T: Compact + 'static> Message for T {}
 
 /// Combination of a message and its destination recipient id
 #[derive(Compact, Clone)]
+#[repr(C)]
 pub struct Packet<M: Message> {
     /// RawID of the `Actor`/`Actor` that should receive this message
     pub recipient_id: RawID,

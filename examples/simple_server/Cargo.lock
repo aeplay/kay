@@ -51,7 +51,7 @@ dependencies = [
 
 [[package]]
 name = "compact"
-version = "0.2.0"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "lazy_static 0.2.11 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -156,11 +156,11 @@ dependencies = [
 
 [[package]]
 name = "kay"
-version = "0.2.1"
+version = "0.2.3"
 dependencies = [
  "byteorder 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "chunky 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "compact 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "compact 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "compact_macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tungstenite 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "url 1.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -181,9 +181,9 @@ dependencies = [
 name = "kay_simple_example_common"
 version = "0.1.0"
 dependencies = [
- "compact 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "compact 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "compact_macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "kay 0.2.1",
+ "kay 0.2.3",
  "kay_codegen 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -191,7 +191,7 @@ dependencies = [
 name = "kay_simple_example_server"
 version = "0.1.0"
 dependencies = [
- "kay 0.2.1",
+ "kay 0.2.3",
  "kay_simple_example_common 0.1.0",
 ]
 
@@ -518,7 +518,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum cc 1.0.17 (registry+https://github.com/rust-lang/crates.io-index)" = "49ec142f5768efb5b7622aebc3fdbdbb8950a4b9ba996393cb76ef7466e8747d"
 "checksum cfg-if 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "efe5c877e17a9c717a0bf3613b2709f723202c4e4675cc8f12926ded29bcb17e"
 "checksum chunky 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a0320fd424f33f78080d25ea3d690479f226305da9d22b78979b6b56c18ef8bf"
-"checksum compact 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2003f2cdc0ba3a38252187d7dc1bcd3ad518df1286b248594e35970cc63391d8"
+"checksum compact 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)" = "26ba924cca568076478fd72d258cdbff376ecc3e3028e3f21fc4a3c3b681eb7f"
 "checksum compact_macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "3e7847152d72f589722cdae298c7a68a38d072c094440065ed8e05fde90e0e8a"
 "checksum core-foundation 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "25bfd746d203017f7d5cbd31ee5d8e17f94b6521c7af77ece6c9e4b2d4b16c67"
 "checksum core-foundation-sys 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "065a5d7ffdcbc8fa145d6f0746f3555025b9097a9e9cda59f7467abae670c78d"

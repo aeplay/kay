@@ -5,11 +5,12 @@ use kay::{ActorSystem, World};
 pub struct Counter {
     id: CounterID,
     count: u32,
+    history: CVec<u32>, 
     listeners: CVec<CounterListenerID>,
 }
 
 pub trait CounterListener {
-    fn on_count_change(&mut self, new_count: u32, world: &mut World);
+    fn on_count_change(&mut self, new_count: u32, history: &CVec<u32>, world: &mut World);
 }
 
 impl Counter {
@@ -17,16 +18,18 @@ impl Counter {
         Counter {
             id,
             count: initial_count,
+            history: vec![initial_count].into(),
             listeners: CVec::new(),
         }
     }
 
     pub fn increment_by(&mut self, increment_amount: u32, world: &mut World) {
         self.count += increment_amount;
+        self.history.push(self.count);
 
         for listener in &self.listeners {
             println!("Notifying {:?}", listener);
-            listener.on_count_change(self.count, world);
+            listener.on_count_change(self.count, self.history.clone(), world);
         }
     }
 
@@ -48,8 +51,8 @@ impl ServerLogger {
 }
 
 impl CounterListener for ServerLogger {
-    fn on_count_change(&mut self, new_count: u32, _: &mut World) {
-        println!("Server got new count: {}!", new_count);
+    fn on_count_change(&mut self, new_count: u32, history: &CVec<u32>, _: &mut World) {
+        println!("Server got new count: {}, history: {:?}!", new_count, history);
     }
 }
 
@@ -66,12 +69,12 @@ impl BrowserLogger {
 }
 
 impl CounterListener for BrowserLogger {
-    fn on_count_change(&mut self, new_count: u32, _: &mut World) {
-        let new_count = new_count as u32;
+    fn on_count_change(&mut self, new_count: u32, history: &CVec<u32>, _: &mut World) {
+        let history_str = format!("{:?}", history);
         #[cfg(feature = "browser")]
         {
             js!{
-                console.log("Browser got new count: ", @ {new_count});
+                console.log("Browser got new count: ", @ {new_count}, "history", @ {history_str});
             }
         }
     }

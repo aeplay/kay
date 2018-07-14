@@ -9,6 +9,9 @@ pub struct MachineID(pub u8);
 #[cfg_attr(feature = "serde-serialization", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RawID {
+    /// Used to identify instances within a top-level `Actor`. The main use-case is
+    /// `Swarm` identifying and dispatching to its `Instances` using this field
+    pub instance_id: u32,
     /// An ID for the type of the identified `Actor`, used to dispatch messages
     /// to the message handling functions registered for this type
     pub type_id: ShortTypeId,
@@ -19,9 +22,6 @@ pub struct RawID {
     /// The version is incremented to make the new (otherwise identical) `RawID`
     /// distinguishable from erroneous references to the `Actor`/`Actor` previously identified
     pub version: u8,
-    /// Used to identify instances within a top-level `Actor`. The main use-case is
-    /// `Swarm` identifying and dispatching to its `Instances` using this field
-    pub instance_id: u32,
 }
 
 pub fn broadcast_instance_id() -> u32 {

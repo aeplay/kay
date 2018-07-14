@@ -6,7 +6,7 @@ build = "./build.rs"
 
 [dependencies]
 kay = { path = "../..", default-features = false }
-compact = "0.2.0"
+compact = "0.2.4"
 compact_macros = "0.1.0"
 stdweb = {version = "0.4.7", optional = true}
 

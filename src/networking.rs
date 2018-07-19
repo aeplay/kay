@@ -6,8 +6,6 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use compact::Compact;
 #[cfg(feature = "server")]
 use std::net::{TcpListener, TcpStream};
-#[cfg(feature = "server")]
-use std::thread;
 use std::time::Duration;
 #[cfg(feature = "browser")]
 use stdweb::traits::{IEventTarget, IMessageEvent};
@@ -32,49 +30,90 @@ pub struct Networking {
     pub n_turns: usize,
     network: Vec<&'static str>,
     network_connections: Vec<Option<Connection>>,
+    #[cfg(feature = "server")]
+    listener: TcpListener,
 }
 
 impl Networking {
     /// Create network environment based on this machines id/index
     /// and all peer addresses (including this machine)
     pub fn new(machine_id: u8, network: Vec<&'static str>) -> Networking {
+        #[cfg(feature = "server")]
+        let listener = {
+            let listener = TcpListener::bind(network[machine_id as usize]).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            listener
+        };
+
         Networking {
             machine_id: MachineID(machine_id),
             n_turns: 0,
             network_connections: (0..network.len()).into_iter().map(|_| None).collect(),
             network,
+            #[cfg(feature = "server")]
+            listener,
         }
     }
 
     #[cfg(feature = "server")]
-    /// Connect to all peers in the network
+    /// Try to connect to peers in the network
     pub fn connect(&mut self) {
-        let listener = TcpListener::bind(self.network[self.machine_id.0 as usize]).unwrap();
-
-        // first wait for all larger machine_ids to connect
-        for (machine_id, _address) in self.network.iter().enumerate() {
-            if machine_id > self.machine_id.0 as usize {
-                let stream = listener.accept().unwrap().0;
-                let mut websocket = websocket_accept(stream).unwrap();
-                self.network_connections[machine_id] = Some(Connection::new(websocket))
+        // first wait for a larger machine_id to connect
+        if self
+            .network_connections
+            .iter()
+            .enumerate()
+            .any(|(machine_id, connection)| {
+                machine_id > self.machine_id.0 as usize && connection.is_none()
+            }) {
+            match self.listener.accept() {
+                Ok((stream, addr)) => {
+                    let mut websocket = websocket_accept(stream).unwrap();
+                    println!("Got connection from {}, shaking hands...", addr);
+                    loop {
+                        match websocket.read_message() {
+                            Ok(WebSocketMessage::Binary(data)) => {
+                                let peer_machine_id = data[0];
+                                self.network_connections[peer_machine_id as usize] =
+                                    Some(Connection::new(websocket));
+                                println!("...machine ID {} connected!", peer_machine_id);
+                                break;
+                            }
+                            Ok(_) => {}
+                            Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                                panic!("Error while expecting first message: {}", real_err)
+                            },
+                        }
+                    }
+                }
+                Err(ref e) if e.kind() == ::std::io::ErrorKind::WouldBlock => {}
+                Err(e) => panic!("Error while accepting connection: {}", e),
             }
         }
 
-        thread::sleep(Duration::from_secs(2));
-
-        // then try to connecto to all smaller machine_ids
+        // then try to connect to all smaller machine_ids
         for (machine_id, address) in self.network.iter().enumerate() {
             if machine_id < self.machine_id.0 as usize {
-                let stream = TcpStream::connect(address).unwrap();
-                let websocket =
-                    websocket_client(Url::parse(&format!("ws://{}", address)).unwrap(), stream)
-                        .unwrap()
-                        .0;
-                self.network_connections[machine_id] = Some(Connection::new(websocket))
+                if self.network_connections[machine_id].is_none() {
+                    let stream = TcpStream::connect(address).unwrap();
+                    stream.set_read_timeout(None).unwrap();
+                    stream.set_write_timeout(None).unwrap();
+                    let mut websocket =
+                        websocket_client(Url::parse(&format!("ws://{}", address)).unwrap(), stream)
+                            .unwrap()
+                            .0;
+                    match websocket
+                        .write_message(WebSocketMessage::binary(vec![self.machine_id.0]))
+                        .and_then(|_| websocket.write_pending())
+                    {
+                        Ok(_) => {}
+                        Err(e) => panic!("Error while sending first message: {}", e),
+                    }
+                    self.network_connections[machine_id] = Some(Connection::new(websocket));
+                    println!("Connected to Machine ID {}", machine_id);
+                }
             }
         }
-
-        println!("All mapped");
     }
 
     #[cfg(feature = "browser")]
@@ -82,8 +121,15 @@ impl Networking {
     pub fn connect(&mut self) {
         for (machine_id, address) in self.network.iter().enumerate() {
             if machine_id != self.machine_id.0 as usize {
-                let websocket = WebSocket::new(&format!("ws://{}", address)).unwrap();
-                self.network_connections[machine_id] = Some(Connection::new(websocket));
+                if self.network_connections[machine_id].is_none() {
+                    let websocket = WebSocket::new(&format!("ws://{}", address)).unwrap();
+                    let mut connection = Some(Connection::new(websocket));
+                    connection
+                        .as_mut()
+                        .unwrap()
+                        .enqueue(vec![self.machine_id.0]);
+                    self.network_connections[machine_id] = connection;
+                }
             }
         }
     }
@@ -121,16 +167,29 @@ impl Networking {
 
         self.n_turns += 1;
 
-        for maybe_connection in &mut self.network_connections {
-            if let Some(ref mut connection) = *maybe_connection {
+        for (machine_id, maybe_connection) in self.network_connections.iter_mut().enumerate() {
+            let closed_reason = if let Some(ref mut connection) = *maybe_connection {
                 // write turn end, use 0 as "message type" to distinguish from actual packet
                 let mut data = Vec::<u8>::with_capacity(
                     ::std::mem::size_of::<ShortTypeId>() + ::std::mem::size_of::<u32>(),
                 );
                 data.write_u16::<LittleEndian>(0).unwrap();
                 data.write_u32::<LittleEndian>(self.n_turns as u32).unwrap();
-                connection.enqueue(data);
                 connection.n_turns_since_own_turn = 0;
+                match connection.enqueue(data) {
+                    Ok(()) => None,
+                    Err(err) => Some(err),
+                }
+            } else {
+                None
+            };
+
+            if let Some(closed_reason) = closed_reason {
+                println!(
+                    "Closed connection to Machine ID {} while sending turn: {}",
+                    machine_id, closed_reason
+                );
+                *maybe_connection = None
             }
         }
     }
@@ -138,10 +197,47 @@ impl Networking {
     /// Send queued outbound messages and take incoming queued messages
     /// and forward them to their local target recipient(s)
     pub fn send_and_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
-        for maybe_connection in &mut self.network_connections {
-            if let Some(ref mut connection) = *maybe_connection {
-                connection.try_send_pending();
-                connection.try_receive(inboxes);
+        self.connect();
+
+        for (machine_id, maybe_connection) in self.network_connections.iter_mut().enumerate() {
+            let closed_reason = if let Some(ref mut connection) = *maybe_connection {
+                match connection
+                    .try_send_pending()
+                    .and_then(|_| connection.try_receive(inboxes))
+                {
+                    Ok(()) => None,
+                    Err(err) => Some(err),
+                }
+            } else {
+                None
+            };
+
+            if let Some(closed_reason) = closed_reason {
+                println!(
+                    "Closed connection to Machine ID {} while receiving: {}",
+                    machine_id, closed_reason
+                );
+                *maybe_connection = None
+            }
+        }
+
+        #[cfg(feature = "browser")]
+        {
+            let max_n_turns = self
+                .network_connections
+                .iter()
+                .map(|maybe_connection| {
+                    if let Some(connection) = maybe_connection {
+                        connection.n_turns
+                    } else {
+                        0
+                    }
+                })
+                .max()
+                .unwrap_or(self.n_turns);
+
+            if max_n_turns > 1000 + self.n_turns {
+                self.n_turns = max_n_turns;
             }
         }
     }
@@ -156,37 +252,44 @@ impl Networking {
         let total_size = ::std::mem::size_of::<ShortTypeId>() + packet_size;
         let machine_id = packet.recipient_id.machine;
 
-        let connections: Vec<&mut Connection> = if machine_id == broadcast_machine_id() {
-            self.network_connections
-                .iter_mut()
-                .filter_map(|maybe_connection| maybe_connection.as_mut())
-                .collect()
+        let recipients = if machine_id == broadcast_machine_id() {
+            (0..self.network.len()).into_iter().collect()
         } else {
-            vec![
-                self.network_connections
-                    .get_mut(machine_id.0 as usize)
-                    .expect("Expected machine index to exist")
-                    .as_mut()
-                    .expect("Expected connection to exist for machine"),
-            ]
+            vec![machine_id.0 as usize]
         };
 
-        for connection in connections {
-            let mut data = Vec::<u8>::with_capacity(total_size);
-            data.write_u16::<LittleEndian>(message_type_id.into())
-                .unwrap();
-            let packet_pos = data.len();
-            data.resize(packet_pos + packet_size, 0);
-            
-            unsafe {
-                // store packet compactly in write queue
-                Compact::compact_behind(
-                    &mut packet,
-                    &mut data[packet_pos] as *mut u8 as *mut Packet<M>,
-                );
-            }
+        for machine_id in recipients {
+            let closed_reason =
+                if let Some(connection) = self.network_connections[machine_id].as_mut() {
+                    let mut data = Vec::<u8>::with_capacity(total_size);
+                    data.write_u16::<LittleEndian>(message_type_id.into())
+                        .unwrap();
+                    let packet_pos = data.len();
+                    data.resize(packet_pos + packet_size, 0);
 
-            connection.enqueue(data);
+                    unsafe {
+                        // store packet compactly in write queue
+                        Compact::compact_behind(
+                            &mut packet,
+                            &mut data[packet_pos] as *mut u8 as *mut Packet<M>,
+                        );
+                    }
+
+                    match connection.enqueue(data) {
+                        Ok(_) => None,
+                        Err(e) => Some(e),
+                    }
+                } else {
+                    None
+                };
+
+            if let Some(closed_reason) = closed_reason {
+                self.network_connections[machine_id] = None;
+                println!(
+                    "Closed connection to Machine ID {} while enqueueing a message: {}",
+                    machine_id, closed_reason
+                )
+            }
         }
 
         ::std::mem::forget(packet);
@@ -238,28 +341,41 @@ impl Connection {
         }
     }
 
-    pub fn enqueue(&mut self, message: Vec<u8>) {
-        let recipient_id =
-            (&message[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
+    pub fn enqueue(&mut self, message: Vec<u8>) -> Result<(), ::tungstenite::Error> {
+        // let recipient_id =
+        //     (&message[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
         // println!(
         //     "Enqueueing message recipient: {:?}, data: {:?}",
         //     unsafe{(*recipient_id)}, message
         // );
-        self.websocket
+        match self
+            .websocket
             .write_message(WebSocketMessage::binary(message))
-            .unwrap();
-    }
-
-    pub fn try_send_pending(&mut self) {
-        match self.websocket.write_pending() {
-            Ok(()) => {}
+        {
+            Ok(()) => Ok(()),
             Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                panic!("{}", real_err)
+                Err(real_err)
+            } else {
+                Ok(())
             },
         }
     }
 
-    pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
+    pub fn try_send_pending(&mut self) -> Result<(), ::tungstenite::Error> {
+        match self.websocket.write_pending() {
+            Ok(()) => Ok(()),
+            Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                Err(real_err)
+            } else {
+                Ok(())
+            },
+        }
+    }
+
+    pub fn try_receive(
+        &mut self,
+        inboxes: &mut [Option<Inbox>],
+    ) -> Result<(), ::tungstenite::Error> {
         loop {
             let blocked = match self.websocket.read_message() {
                 Ok(WebSocketMessage::Binary(data)) => dispatch_message(
@@ -270,7 +386,7 @@ impl Connection {
                 ),
                 Ok(other_message) => panic!("Got a non binary message: {:?}", other_message),
                 Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                    panic!("{}", real_err)
+                    return Err(real_err);
                 } else {
                     true
                 },
@@ -280,6 +396,7 @@ impl Connection {
                 break;
             }
         }
+        Ok(())
     }
 }
 
@@ -372,7 +489,7 @@ impl Connection {
         }
     }
 
-    pub fn enqueue(&mut self, message: Vec<u8>) {
+    pub fn enqueue(&mut self, message: Vec<u8>) -> Result<(), ::std::io::Error> {
         if self.websocket.ready_state() == SocketReadyState::Open {
             for earlier_message in self.before_ready_queue.drain(..) {
                 self.websocket.send_bytes(&earlier_message).unwrap()
@@ -381,13 +498,15 @@ impl Connection {
         } else {
             self.before_ready_queue.push(message);
         }
+        Ok(())
     }
 
-    pub fn try_send_pending(&mut self) {
+    pub fn try_send_pending(&mut self) -> Result<(), ::std::io::Error> {
         // nothing to do here
+        Ok(())
     }
 
-    pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
+    pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) -> Result<(), ::std::io::Error> {
         if let Ok(mut in_queue) = self.in_queue.try_borrow_mut() {
             //console!(log, "Before drain!");
             for message in in_queue.drain(..) {
@@ -403,5 +522,6 @@ impl Connection {
         } else {
             //console!(log, "Cannot borrow inqueue mutably!")
         }
+        Ok(())
     }
 }

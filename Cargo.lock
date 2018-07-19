@@ -171,7 +171,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "kay"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "byteorder 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "chunky 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",

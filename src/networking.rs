@@ -301,14 +301,18 @@ impl Networking {
         self.network_connections
             .iter()
             .enumerate()
-            .map(|(i, connection)| {
+            .map(|(i, maybe_connection)| {
                 format!(
                     "{}: {}",
                     i,
                     if i == usize::from(self.machine_id.0) {
-                        self.n_turns
+                        self.n_turns as isize
                     } else {
-                        connection.as_ref().unwrap().n_turns
+                        if let Some(connection) = maybe_connection.as_ref() {
+                            connection.n_turns as isize
+                        } else {
+                            -1
+                        }
                     }
                 )
             })

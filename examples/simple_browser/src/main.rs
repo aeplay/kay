@@ -21,7 +21,7 @@ fn main() {
         console.log("Starting actor system...");
     }
 
-    let mut system = ActorSystem::new(Networking::new(1, vec!["localhost:9999","wsclient"]));
+    let mut system = ActorSystem::new(Networking::new(1, vec!["localhost:9999","wsclient"], 30, 10));
     counter::setup(&mut system);
 
     js! {

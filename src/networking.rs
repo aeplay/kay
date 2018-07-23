@@ -29,6 +29,7 @@ pub struct Networking {
     /// if this machine lags behind or runs fast compared to its peers
     pub n_turns: usize,
     acceptable_turn_distance: usize,
+    turn_sleep_distance_ratio: usize,
     network: Vec<&'static str>,
     network_connections: Vec<Option<Connection>>,
     #[cfg(feature = "server")]
@@ -38,7 +39,7 @@ pub struct Networking {
 impl Networking {
     /// Create network environment based on this machines id/index
     /// and all peer addresses (including this machine)
-    pub fn new(machine_id: u8, network: Vec<&'static str>, acceptable_turn_distance: usize) -> Networking {
+    pub fn new(machine_id: u8, network: Vec<&'static str>, acceptable_turn_distance: usize, turn_sleep_distance_ratio: usize) -> Networking {
         #[cfg(feature = "server")]
         let listener = {
             let listener = TcpListener::bind(network[machine_id as usize]).unwrap();
@@ -50,6 +51,7 @@ impl Networking {
             machine_id: MachineID(machine_id),
             n_turns: 0,
             acceptable_turn_distance,
+            turn_sleep_distance_ratio,
             network_connections: (0..network.len()).into_iter().map(|_| None).collect(),
             network,
             #[cfg(feature = "server")]
@@ -145,7 +147,7 @@ impl Networking {
             if let Some(Connection { n_turns, .. }) = *maybe_connection {
                 if n_turns + self.acceptable_turn_distance < self.n_turns {
                     should_sleep = Some((
-                        Duration::from_millis(((self.n_turns - self.acceptable_turn_distance - n_turns) / 10) as u64),
+                        Duration::from_millis(((self.n_turns - self.acceptable_turn_distance - n_turns) / self.turn_sleep_distance_ratio) as u64),
                         n_turns,
                     ));
                 }

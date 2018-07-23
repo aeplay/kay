@@ -6,7 +6,7 @@ use kay_simple_example_common::counter;
 
 fn main() {
     println!("Creating actor system...");
-    let mut system = ActorSystem::new(Networking::new(0, vec!["localhost:9999","wsclient"]));
+    let mut system = ActorSystem::new(Networking::new(0, vec!["localhost:9999","wsclient"], 30, 10));
     counter::setup(&mut system);
 
     println!("Connecting to network...");

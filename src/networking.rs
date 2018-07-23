@@ -39,7 +39,12 @@ pub struct Networking {
 impl Networking {
     /// Create network environment based on this machines id/index
     /// and all peer addresses (including this machine)
-    pub fn new(machine_id: u8, network: Vec<&'static str>, acceptable_turn_distance: usize, turn_sleep_distance_ratio: usize) -> Networking {
+    pub fn new(
+        machine_id: u8,
+        network: Vec<&'static str>,
+        acceptable_turn_distance: usize,
+        turn_sleep_distance_ratio: usize,
+    ) -> Networking {
         #[cfg(feature = "server")]
         let listener = {
             let listener = TcpListener::bind(network[machine_id as usize]).unwrap();
@@ -140,33 +145,19 @@ impl Networking {
 
     /// Finish the current networking turn and wait for peers which lag behind
     /// based on their turn number. This is the main backpressure mechanism.
-    pub fn finish_turn(&mut self, inboxes: &mut [Option<Inbox>]) {
+    pub fn finish_turn(&mut self) -> Option<Duration> {
         let mut should_sleep = None;
 
         for maybe_connection in &mut self.network_connections {
             if let Some(Connection { n_turns, .. }) = *maybe_connection {
                 if n_turns + self.acceptable_turn_distance < self.n_turns {
-                    should_sleep = Some((
-                        Duration::from_millis(((self.n_turns - self.acceptable_turn_distance - n_turns) / self.turn_sleep_distance_ratio) as u64),
-                        n_turns,
+                    should_sleep = Some(Duration::from_millis(
+                        ((self.n_turns - self.acceptable_turn_distance - n_turns)
+                            / self.turn_sleep_distance_ratio) as u64,
                     ));
                 }
             }
         }
-
-        if let Some((duration, _other_n_turns)) = should_sleep {
-            // println!(
-            //     "Sleeping to let other machine catch up ({} vs. {} turns)",
-            //     other_n_turns,
-            //     self.n_turns
-            // );
-            // Try to process extra messages if we are ahead
-            self.send_and_receive(inboxes);
-            self.send_and_receive(inboxes);
-            self.send_and_receive(inboxes);
-            #[cfg(feature = "server")]
-            ::std::thread::sleep(duration);
-        };
 
         self.n_turns += 1;
 
@@ -195,6 +186,8 @@ impl Networking {
                 *maybe_connection = None
             }
         }
+
+        should_sleep
     }
 
     /// Send queued outbound messages and take incoming queued messages
@@ -419,9 +412,9 @@ fn dispatch_message(
         *n_turns_since_own_turn += 1;
 
         // pretend that we're blocked so we only ever process all
-        // messages of 5 incoming turns within one of our own turns,
+        // messages of 10 incoming turns within one of our own turns,
         // applying backpressure
-        *n_turns_since_own_turn >= 5
+        *n_turns_since_own_turn >= 10
     } else {
         let recipient_id =
             (&data[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;

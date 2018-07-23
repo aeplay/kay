@@ -28,6 +28,7 @@ pub struct Networking {
     /// The current network turn this machine is in. Used to keep track
     /// if this machine lags behind or runs fast compared to its peers
     pub n_turns: usize,
+    acceptable_turn_distance: usize,
     network: Vec<&'static str>,
     network_connections: Vec<Option<Connection>>,
     #[cfg(feature = "server")]
@@ -37,7 +38,7 @@ pub struct Networking {
 impl Networking {
     /// Create network environment based on this machines id/index
     /// and all peer addresses (including this machine)
-    pub fn new(machine_id: u8, network: Vec<&'static str>) -> Networking {
+    pub fn new(machine_id: u8, network: Vec<&'static str>, acceptable_turn_distance: usize) -> Networking {
         #[cfg(feature = "server")]
         let listener = {
             let listener = TcpListener::bind(network[machine_id as usize]).unwrap();
@@ -48,6 +49,7 @@ impl Networking {
         Networking {
             machine_id: MachineID(machine_id),
             n_turns: 0,
+            acceptable_turn_distance,
             network_connections: (0..network.len()).into_iter().map(|_| None).collect(),
             network,
             #[cfg(feature = "server")]
@@ -81,13 +83,13 @@ impl Networking {
                             }
                             Ok(_) => {}
                             Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                                panic!("Error while expecting first message: {}", real_err)
+                                println!("Error while expecting first message: {}", real_err)
                             },
                         }
                     }
                 }
                 Err(ref e) if e.kind() == ::std::io::ErrorKind::WouldBlock => {}
-                Err(e) => panic!("Error while accepting connection: {}", e),
+                Err(e) => println!("Error while accepting connection: {}", e),
             }
         }
 
@@ -141,10 +143,9 @@ impl Networking {
 
         for maybe_connection in &mut self.network_connections {
             if let Some(Connection { n_turns, .. }) = *maybe_connection {
-                if n_turns + 120 < self.n_turns {
-                    // ~2s difference
+                if n_turns + self.acceptable_turn_distance < self.n_turns {
                     should_sleep = Some((
-                        Duration::from_millis(((self.n_turns - 120 - n_turns) / 10) as u64),
+                        Duration::from_millis(((self.n_turns - self.acceptable_turn_distance - n_turns) / 10) as u64),
                         n_turns,
                     ));
                 }

@@ -101,7 +101,8 @@ impl<A: Actor + Clone> Swarm<A> {
     fn remove(&mut self, id: RawID) {
         let i = self
             .slot_map
-            .indices_of_no_version_check(id.instance_id as usize);
+            .indices_of_no_version_check(id.instance_id as usize)
+            .expect("actor should exist when removing");
         self.remove_at_index(i, id);
     }
 
@@ -118,7 +119,10 @@ impl<A: Actor + Clone> Swarm<A> {
     }
 
     fn resize(&mut self, id: usize) -> bool {
-        let index = self.slot_map.indices_of_no_version_check(id);
+        let index = self
+            .slot_map
+            .indices_of_no_version_check(id)
+            .expect("actor should exist when resizing");
         self.resize_at_index(index)
     }
 
@@ -145,7 +149,7 @@ impl<A: Actor + Clone> Swarm<A> {
                 (fate, actor.is_still_compact())
             } else {
                 println!(
-                    "Tried to send {} packet to {} actor of wrong version!",
+                    "Tried to send {} packet to nonexisting or dead {} actor!",
                     unsafe { ::std::intrinsics::type_name::<M>() },
                     unsafe { ::std::intrinsics::type_name::<A>() }
                 );

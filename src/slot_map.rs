@@ -69,24 +69,34 @@ impl SlotMap {
     }
 
     pub fn associate(&mut self, id: usize, new_entry: SlotIndices) {
-        let entry = self.entries.at_mut(id);
+        let entry = self
+            .entries
+            .at_mut(id)
+            .expect("Should already have entry allocated when associating");
         entry.clone_from(&new_entry);
     }
 
     pub fn indices_of(&self, id: usize, version: u8) -> Option<SlotIndices> {
-        if *self.last_known_version.at(id) == version {
-            Some(self.indices_of_no_version_check(id))
+        if let Some(last_known_version) = self.last_known_version.at(id) {
+            if *last_known_version == version {
+                self.indices_of_no_version_check(id)
+            } else {
+                None
+            }
         } else {
             None
         }
     }
 
-    pub fn indices_of_no_version_check(&self, id: usize) -> SlotIndices {
-        *self.entries.at(id)
+    pub fn indices_of_no_version_check(&self, id: usize) -> Option<SlotIndices> {
+        self.entries.at(id).cloned()
     }
 
     pub fn free(&mut self, id: usize, version: usize) {
-        *self.last_known_version.at_mut(id) = (version + 1) as u8;
+        *self
+            .last_known_version
+            .at_mut(id)
+            .expect("should have last known version when freeing") = (version + 1) as u8;
         self.free_ids_with_versions.push((id, version + 1));
     }
 }

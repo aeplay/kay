@@ -21,7 +21,7 @@ fn main() {
         console.log("Starting actor system...");
     }
 
-    let mut system = ActorSystem::new(Networking::new(1, vec!["localhost:9999","wsclient"], 30, 10));
+    let mut system = ActorSystem::new(Networking::new(1, vec!["localhost:9999","wsclient"], 50_000, 30, 10));
     counter::setup(&mut system);
 
     js! {
@@ -57,6 +57,7 @@ impl Looper {
         system.process_all_messages();
 
         system.networking_finish_turn();
+        system.networking_send_and_receive();
 
         stdweb::web::set_timeout(
             move || {

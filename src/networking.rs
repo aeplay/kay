@@ -25,6 +25,7 @@ use url::Url;
 pub struct Networking {
     /// The machine index of this machine within the network of peers
     pub machine_id: MachineID,
+    batch_message_bytes: usize,
     /// The current network turn this machine is in. Used to keep track
     /// if this machine lags behind or runs fast compared to its peers
     pub n_turns: usize,
@@ -42,6 +43,7 @@ impl Networking {
     pub fn new(
         machine_id: u8,
         network: Vec<&'static str>,
+        batch_message_bytes: usize,
         acceptable_turn_distance: usize,
         turn_sleep_distance_ratio: usize,
     ) -> Networking {
@@ -54,6 +56,7 @@ impl Networking {
 
         Networking {
             machine_id: MachineID(machine_id),
+            batch_message_bytes,
             n_turns: 0,
             acceptable_turn_distance,
             turn_sleep_distance_ratio,
@@ -77,22 +80,25 @@ impl Networking {
             }) {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
-                    let mut websocket = websocket_accept(stream).unwrap();
                     println!("Got connection from {}, shaking hands...", addr);
-                    loop {
-                        match websocket.read_message() {
-                            Ok(WebSocketMessage::Binary(data)) => {
-                                let peer_machine_id = data[0];
-                                self.network_connections[peer_machine_id as usize] =
-                                    Some(Connection::new(websocket));
-                                println!("...machine ID {} connected!", peer_machine_id);
-                                break;
+                    match websocket_accept(stream) {
+                        Ok(mut websocket) => loop {
+                            match websocket.read_message() {
+                                Ok(WebSocketMessage::Binary(data)) => {
+                                    let peer_machine_id = data[0];
+                                    self.network_connections[peer_machine_id as usize] =
+                                        Some(Connection::new(websocket, self.batch_message_bytes));
+                                    println!("...machine ID {} connected!", peer_machine_id);
+                                    break;
+                                }
+                                Ok(_) => {}
+                                Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                                    println!("Error while expecting first message: {}", real_err);
+                                    break;
+                                },
                             }
-                            Ok(_) => {}
-                            Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                                println!("Error while expecting first message: {}", real_err)
-                            },
-                        }
+                        },
+                        Err(e) => println!("Error while accepting connection: {}", e),
                     }
                 }
                 Err(ref e) if e.kind() == ::std::io::ErrorKind::WouldBlock => {}
@@ -118,7 +124,8 @@ impl Networking {
                         Ok(_) => {}
                         Err(e) => panic!("Error while sending first message: {}", e),
                     }
-                    self.network_connections[machine_id] = Some(Connection::new(websocket));
+                    self.network_connections[machine_id] =
+                        Some(Connection::new(websocket, self.batch_message_bytes));
                     println!("Connected to Machine ID {}", machine_id);
                 }
             }
@@ -132,11 +139,12 @@ impl Networking {
             if machine_id != self.machine_id.0 as usize {
                 if self.network_connections[machine_id].is_none() {
                     let websocket = WebSocket::new(&format!("ws://{}", address)).unwrap();
-                    let mut connection = Some(Connection::new(websocket));
+                    let mut connection = Some(Connection::new(websocket, self.batch_message_bytes));
                     connection
                         .as_mut()
                         .unwrap()
-                        .enqueue(vec![self.machine_id.0]);
+                        .out_batches
+                        .insert(0, vec![self.machine_id.0]);
                     self.network_connections[machine_id] = connection;
                 }
             }
@@ -161,29 +169,17 @@ impl Networking {
 
         self.n_turns += 1;
 
-        for (machine_id, maybe_connection) in self.network_connections.iter_mut().enumerate() {
-            let closed_reason = if let Some(ref mut connection) = *maybe_connection {
+        for maybe_connection in self.network_connections.iter_mut() {
+            if let Some(ref mut connection) = *maybe_connection {
                 // write turn end, use 0 as "message type" to distinguish from actual packet
-                let mut data = Vec::<u8>::with_capacity(
-                    ::std::mem::size_of::<ShortTypeId>() + ::std::mem::size_of::<u32>(),
-                );
-                data.write_u16::<LittleEndian>(0).unwrap();
-                data.write_u32::<LittleEndian>(self.n_turns as u32).unwrap();
-                connection.n_turns_since_own_turn = 0;
-                match connection.enqueue(data) {
-                    Ok(()) => None,
-                    Err(err) => Some(err),
+                {
+                    let mut data = connection.enqueue_in_batch(
+                        ::std::mem::size_of::<ShortTypeId>() + ::std::mem::size_of::<u32>(),
+                    );
+                    data.write_u16::<LittleEndian>(0).unwrap();
+                    data.write_u32::<LittleEndian>(self.n_turns as u32).unwrap();
                 }
-            } else {
-                None
-            };
-
-            if let Some(closed_reason) = closed_reason {
-                println!(
-                    "Closed connection to Machine ID {} while sending turn: {}",
-                    machine_id, closed_reason
-                );
-                *maybe_connection = None
+                connection.n_turns_since_own_turn = 0;
             }
         }
 
@@ -255,36 +251,20 @@ impl Networking {
         };
 
         for machine_id in recipients {
-            let closed_reason =
-                if let Some(connection) = self.network_connections[machine_id].as_mut() {
-                    let mut data = Vec::<u8>::with_capacity(total_size);
-                    data.write_u16::<LittleEndian>(message_type_id.into())
-                        .unwrap();
-                    let packet_pos = data.len();
-                    data.resize(packet_pos + packet_size, 0);
+            if let Some(connection) = self.network_connections[machine_id].as_mut() {
+                let mut data = connection.enqueue_in_batch(total_size);
+                data.write_u16::<LittleEndian>(message_type_id.into())
+                    .unwrap();
+                let packet_pos = data.len();
+                data.resize(packet_pos + packet_size, 0);
 
-                    unsafe {
-                        // store packet compactly in write queue
-                        Compact::compact_behind(
-                            &mut packet,
-                            &mut data[packet_pos] as *mut u8 as *mut Packet<M>,
-                        );
-                    }
-
-                    match connection.enqueue(data) {
-                        Ok(_) => None,
-                        Err(e) => Some(e),
-                    }
-                } else {
-                    None
-                };
-
-            if let Some(closed_reason) = closed_reason {
-                self.network_connections[machine_id] = None;
-                println!(
-                    "Closed connection to Machine ID {} while enqueueing a message: {}",
-                    machine_id, closed_reason
-                )
+                unsafe {
+                    // store packet compactly in write queue
+                    Compact::compact_behind(
+                        &mut packet,
+                        &mut data[packet_pos] as *mut u8 as *mut Packet<M>,
+                    );
+                }
             }
         }
 
@@ -322,11 +302,13 @@ pub struct Connection {
     n_turns: usize,
     n_turns_since_own_turn: usize,
     websocket: WebSocket<TcpStream>,
+    out_batches: Vec<Vec<u8>>,
+    batch_message_bytes: usize,
 }
 
 #[cfg(feature = "server")]
 impl Connection {
-    pub fn new(mut websocket: WebSocket<TcpStream>) -> Connection {
+    pub fn new(mut websocket: WebSocket<TcpStream>, batch_message_bytes: usize) -> Connection {
         {
             let tcp_socket = websocket.get_mut();
             tcp_socket.set_nonblocking(true).unwrap();
@@ -338,30 +320,50 @@ impl Connection {
             n_turns: 0,
             n_turns_since_own_turn: 0,
             websocket,
+            out_batches: vec![Vec::with_capacity(batch_message_bytes)],
+            batch_message_bytes,
         }
     }
 
-    pub fn enqueue(&mut self, message: Vec<u8>) -> Result<(), ::tungstenite::Error> {
+    pub fn enqueue_in_batch(&mut self, message_size: usize) -> &mut Vec<u8> {
         // let recipient_id =
         //     (&message[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
         // println!(
         //     "Enqueueing message recipient: {:?}, data: {:?}",
         //     unsafe{(*recipient_id)}, message
         // );
-        match self
-            .websocket
-            .write_message(WebSocketMessage::binary(message))
-        {
-            Ok(()) => Ok(()),
-            Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                Err(real_err)
+
+        let batch =
+            if self.out_batches.last().unwrap().len() < self.batch_message_bytes - message_size {
+                self.out_batches.last_mut().unwrap()
             } else {
-                Ok(())
-            },
-        }
+                self.out_batches
+                    .push(Vec::with_capacity(self.batch_message_bytes));
+                self.out_batches.last_mut().unwrap()
+            };
+
+        batch
+            .write_u32::<LittleEndian>(message_size as u32)
+            .unwrap();
+
+        batch
     }
 
     pub fn try_send_pending(&mut self) -> Result<(), ::tungstenite::Error> {
+        for batch in self.out_batches.drain(..) {
+            match self
+                .websocket
+                .write_message(WebSocketMessage::binary(batch))
+            {
+                Ok(_) => {}
+                Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                    return Err(real_err);
+                },
+            }
+        }
+
+        self.out_batches.push(Vec::with_capacity(self.batch_message_bytes));
+
         match self.websocket.write_pending() {
             Ok(()) => Ok(()),
             Err(e) => if let Some(real_err) = e.into_non_blocking() {
@@ -378,8 +380,8 @@ impl Connection {
     ) -> Result<(), ::tungstenite::Error> {
         loop {
             let blocked = match self.websocket.read_message() {
-                Ok(WebSocketMessage::Binary(data)) => dispatch_message(
-                    data,
+                Ok(WebSocketMessage::Binary(data)) => dispatch_batch(
+                    &data,
                     inboxes,
                     &mut self.n_turns,
                     &mut self.n_turns_since_own_turn,
@@ -400,8 +402,40 @@ impl Connection {
     }
 }
 
+fn dispatch_batch(
+    data: &[u8],
+    inboxes: &mut [Option<Inbox>],
+    n_turns: &mut usize,
+    n_turns_since_own_turn: &mut usize,
+) -> bool {
+    // let msg = format!("Got batch of len {}, {:?}", data.len(), data);
+    // #[cfg(feature = "server")]
+    // println!("{}", msg);
+    // #[cfg(feature = "browser")]
+    // console!(log, msg);
+
+    let mut pos = 0;
+    let mut one_wants_to_wait = false;
+
+    while pos < data.len() {
+        let message_size = LittleEndian::read_u32(&data[pos..]);
+        pos += ::std::mem::size_of::<u32>();
+        let wants_to_wait = dispatch_message(
+            &data[pos..(pos + message_size as usize)],
+            inboxes,
+            n_turns,
+            n_turns_since_own_turn,
+        );
+        one_wants_to_wait = one_wants_to_wait || wants_to_wait;
+
+        pos += message_size as usize;
+    }
+
+    one_wants_to_wait
+}
+
 fn dispatch_message(
-    data: Vec<u8>,
+    data: &[u8],
     inboxes: &mut [Option<Inbox>],
     n_turns: &mut usize,
     n_turns_since_own_turn: &mut usize,
@@ -460,7 +494,9 @@ pub struct Connection {
     n_turns_since_own_turn: usize,
     websocket: WebSocket,
     in_queue: Rc<RefCell<VecDeque<Vec<u8>>>>,
-    before_ready_queue: Vec<Vec<u8>>,
+    got_machine_id: Rc<RefCell<bool>>,
+    out_batches: Vec<Vec<u8>>,
+    batch_message_bytes: usize,
 }
 
 #[cfg(feature = "browser")]
@@ -468,16 +504,24 @@ use stdweb::web::event::SocketMessageEvent;
 
 #[cfg(feature = "browser")]
 impl Connection {
-    pub fn new(websocket: WebSocket) -> Connection {
+    pub fn new(websocket: WebSocket, batch_message_bytes: usize) -> Connection {
         let in_queue = Rc::new(RefCell::new(VecDeque::new()));
         let in_queue_for_listener = in_queue.clone();
+        let got_machine_id = Rc::new(RefCell::new(false));
+        let got_machine_id_for_listener = got_machine_id.clone();
 
         websocket.set_binary_type(SocketBinaryType::ArrayBuffer);
         websocket.add_event_listener(move |event: SocketMessageEvent| {
-            in_queue_for_listener.borrow_mut().push_back({
-                let typed_array: TypedArray<u8> = event.data().into_array_buffer().unwrap().into();
-                typed_array.to_vec()
-            })
+            let mut got_machine_id = got_machine_id_for_listener.borrow_mut();
+            if *got_machine_id {
+                in_queue_for_listener.borrow_mut().push_back({
+                    let typed_array: TypedArray<u8> = event.data().into_array_buffer().unwrap().into();
+                    typed_array.to_vec()
+                })
+            } else {
+                // ignore first packet
+                *got_machine_id = true;
+            }
         });
 
         Connection {
@@ -485,34 +529,54 @@ impl Connection {
             n_turns_since_own_turn: 0,
             websocket,
             in_queue,
-            before_ready_queue: Vec::new(),
+            got_machine_id,
+            out_batches: vec![Vec::with_capacity(batch_message_bytes)],
+            batch_message_bytes,
         }
     }
 
-    pub fn enqueue(&mut self, message: Vec<u8>) -> Result<(), ::std::io::Error> {
-        if self.websocket.ready_state() == SocketReadyState::Open {
-            for earlier_message in self.before_ready_queue.drain(..) {
-                self.websocket.send_bytes(&earlier_message).unwrap()
-            }
-            self.websocket.send_bytes(&message).unwrap();
-        } else {
-            self.before_ready_queue.push(message);
-        }
-        Ok(())
+    pub fn enqueue_in_batch(&mut self, message_size: usize) -> &mut Vec<u8> {
+        // let recipient_id =
+        //     (&message[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
+        // println!(
+        //     "Enqueueing message recipient: {:?}, data: {:?}",
+        //     unsafe{(*recipient_id)}, message
+        // );
+
+        let batch =
+            if self.out_batches.last().unwrap().len() < self.batch_message_bytes - message_size {
+                self.out_batches.last_mut().unwrap()
+            } else {
+                self.out_batches
+                    .push(Vec::with_capacity(self.batch_message_bytes));
+                self.out_batches.last_mut().unwrap()
+            };
+
+        batch
+            .write_u32::<LittleEndian>(message_size as u32)
+            .unwrap();
+
+        batch
     }
 
     pub fn try_send_pending(&mut self) -> Result<(), ::std::io::Error> {
-        // nothing to do here
+        if self.websocket.ready_state() == SocketReadyState::Open {
+            for batch in self.out_batches.drain(..) {
+                self.websocket.send_bytes(&batch).unwrap();
+            }
+
+            self.out_batches.push(Vec::with_capacity(self.batch_message_bytes));
+        }
         Ok(())
     }
 
     pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) -> Result<(), ::std::io::Error> {
         if let Ok(mut in_queue) = self.in_queue.try_borrow_mut() {
             //console!(log, "Before drain!");
-            for message in in_queue.drain(..) {
+            for batch in in_queue.drain(..) {
                 //console!(log, "Before dispatch!");
-                dispatch_message(
-                    message,
+                dispatch_batch(
+                    &batch,
                     inboxes,
                     &mut self.n_turns,
                     &mut self.n_turns_since_own_turn,

@@ -297,7 +297,7 @@ impl Networking {
 
     #[cfg(feature = "browser")]
     pub fn main_out_connection(&self) -> Option<&Connection> {
-        self.network_connections[1].as_ref()
+        self.network_connections[0].as_ref()
     }
 }
 

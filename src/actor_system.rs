@@ -401,10 +401,18 @@ impl ActorSystem {
 
     /// Get current inbox queue lengths per actor type
     pub fn get_queue_lengths(&self) -> HashMap<String, usize> {
+        #[cfg(feature = "server")]
+        let connection_queue_length = None;
+        #[cfg(feature = "browser")]
+        let connection_queue_length = self.networking.main_out_connection().map(|connection|
+            ("NETWORK QUEUE".to_owned(), connection.in_queue_len())
+        );
+
         self.inboxes.iter().enumerate().filter_map(|(i, maybe_inbox)| maybe_inbox.as_ref().map(|inbox| {
             let actor_name = self.actor_registry.get_name(ShortTypeId::new(i as u16).unwrap());
             (actor_name.to_owned(), inbox.len())
-        })).collect()
+        }))
+        .chain(connection_queue_length).collect()
     }
 }
 

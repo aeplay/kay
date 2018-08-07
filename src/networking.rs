@@ -294,6 +294,11 @@ impl Networking {
             })
             .collect()
     }
+
+    #[cfg(feature = "browser")]
+    pub fn main_out_connection(&self) -> Option<&Connection> {
+        self.network_connections[1].as_ref()
+    }
 }
 
 #[cfg(feature = "server")]
@@ -586,5 +591,9 @@ impl Connection {
             //console!(log, "Cannot borrow inqueue mutably!")
         }
         Ok(())
+    }
+
+    pub fn in_queue_len(&self) -> usize {
+        self.in_queue.borrow().len()
     }
 }

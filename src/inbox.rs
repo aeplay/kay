@@ -36,6 +36,10 @@ impl Inbox {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
     pub fn put_raw(&mut self, buf: &[u8]) {
         unsafe {
             let queue_ptr = self.queue.enqueue(buf.len());
@@ -44,7 +48,7 @@ impl Inbox {
         }
     }
 
-    pub fn empty(&mut self) -> InboxIterator {
+    pub fn drain(&mut self) -> InboxIterator {
         InboxIterator {
             n_messages_to_read: self.queue.len(),
             queue: &mut self.queue,

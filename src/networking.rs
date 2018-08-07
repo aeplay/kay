@@ -4,6 +4,7 @@ use super::messaging::{Message, Packet};
 use super::type_registry::ShortTypeId;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use compact::Compact;
+use std::collections::HashMap;
 #[cfg(feature = "server")]
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
@@ -273,14 +274,13 @@ impl Networking {
 
     /// Return a debug message containing the current local view of
     /// network turn progress of all peers in the network
-    pub fn debug_all_n_turns(&self) -> String {
+    pub fn debug_all_n_turns(&self) -> HashMap<MachineID, isize> {
         self.network_connections
             .iter()
             .enumerate()
             .map(|(i, maybe_connection)| {
-                format!(
-                    "{}: {}",
-                    i,
+                (
+                    MachineID(i as u8),
                     if i == usize::from(self.machine_id.0) {
                         self.n_turns as isize
                     } else {
@@ -292,8 +292,7 @@ impl Networking {
                     }
                 )
             })
-            .collect::<Vec<_>>()
-            .join(",\n")
+            .collect()
     }
 }
 

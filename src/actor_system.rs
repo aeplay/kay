@@ -7,6 +7,7 @@ use super::type_registry::{ShortTypeId, TypeRegistry};
 use compact::Compact;
 use std::mem::size_of;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::collections::HashMap;
 
 /// Trait that allows dynamically sized `Actor` instances to provide
 /// a "typical size" hint to optimize their storage in a `Swarm`
@@ -102,6 +103,7 @@ pub struct ActorSystem {
     message_registry: TypeRegistry,
     dispatchers: [[Option<Dispatcher>; MAX_MESSAGE_TYPES]; MAX_RECIPIENT_TYPES],
     actors_as_countables: Vec<(String, *const InstancesCountable)>,
+    message_statistics: [usize; MAX_MESSAGE_TYPES],
     networking: Networking,
 }
 
@@ -139,6 +141,7 @@ impl ActorSystem {
                 ))
             },
             actors_as_countables: Vec::new(),
+            message_statistics: [0; MAX_MESSAGE_TYPES],
             networking,
         }
     }
@@ -285,7 +288,7 @@ impl ActorSystem {
                     for DispatchablePacket {
                         message_type,
                         packet_ptr,
-                    } in inbox.empty()
+                    } in inbox.drain()
                     {
                         if let Some(handler) = self.dispatchers[recipient_type.as_usize()]
                             [message_type.as_usize()]
@@ -293,6 +296,7 @@ impl ActorSystem {
                         {
                             if handler.critical || !self.panic_happened {
                                 (handler.function)(packet_ptr, &mut world);
+                                self.message_statistics[message_type.as_usize()] += 1;
                             }
                         } else {
                             panic!(
@@ -363,22 +367,44 @@ impl ActorSystem {
 
     /// Return a debug message containing the current local view of
     /// network turn progress of all peers in the network
-    pub fn networking_debug_all_n_turns(&self) -> String {
+    pub fn networking_debug_all_n_turns(&self) -> HashMap<MachineID, isize> {
         self.networking.debug_all_n_turns()
     }
 
-    /// Access to debugging statistics
-    pub fn get_instance_counts(&self) -> String {
+    /// Get current instance counts for all actory types
+    pub fn get_instance_counts(&self) -> HashMap<String, usize> {
         self.actors_as_countables
             .iter()
             .map(|&(ref actor_name, countable_ptr)| {
-                format!(
-                    "{}: {}\n",
-                    actor_name.split("::").last().unwrap().replace(">", ""),
-                    unsafe { (*countable_ptr).instance_count() }
-                )
+                (actor_name.split("::").last().unwrap().replace(">", ""),
+                    unsafe { (*countable_ptr).instance_count()})
             })
             .collect()
+    }
+
+    /// Get number of processed messages per message type since last reset
+    pub fn get_message_statistics(&self) -> HashMap<String, usize> {
+        self.message_statistics.iter().enumerate().filter_map(|(i, n_sent)|
+            if *n_sent > 0 {
+                let name = self.message_registry.get_name(ShortTypeId::new(i as u16).unwrap());
+                Some((name.to_owned(), *n_sent))
+            } else {
+                None
+            }
+        ).collect()
+    }
+
+    /// Reset count of processed messages
+    pub fn reset_message_statistics(&mut self) {
+        self.message_statistics = [0; MAX_MESSAGE_TYPES]
+    }
+
+    /// Get current inbox queue lengths per actor type
+    pub fn get_queue_lengths(&self) -> HashMap<String, usize> {
+        self.inboxes.iter().enumerate().filter_map(|(i, maybe_inbox)| maybe_inbox.as_ref().map(|inbox| {
+            let actor_name = self.actor_registry.get_name(ShortTypeId::new(i as u16).unwrap());
+            (actor_name.to_owned(), inbox.len())
+        })).collect()
     }
 }
 

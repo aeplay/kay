@@ -7,7 +7,6 @@ use compact::Compact;
 use std::collections::HashMap;
 #[cfg(feature = "server")]
 use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
 #[cfg(feature = "browser")]
 use stdweb::traits::{IEventTarget, IMessageEvent};
 #[cfg(feature = "browser")]
@@ -31,7 +30,7 @@ pub struct Networking {
     /// if this machine lags behind or runs fast compared to its peers
     pub n_turns: usize,
     acceptable_turn_distance: usize,
-    turn_sleep_distance_ratio: usize,
+    skip_turns_per_turn_head: usize,
     network: Vec<&'static str>,
     network_connections: Vec<Option<Connection>>,
     #[cfg(feature = "server")]
@@ -46,7 +45,7 @@ impl Networking {
         network: Vec<&'static str>,
         batch_message_bytes: usize,
         acceptable_turn_distance: usize,
-        turn_sleep_distance_ratio: usize,
+        skip_turns_per_turn_head: usize,
     ) -> Networking {
         #[cfg(feature = "server")]
         let listener = {
@@ -60,7 +59,7 @@ impl Networking {
             batch_message_bytes,
             n_turns: 0,
             acceptable_turn_distance,
-            turn_sleep_distance_ratio,
+            skip_turns_per_turn_head,
             network_connections: (0..network.len()).into_iter().map(|_| None).collect(),
             network,
             #[cfg(feature = "server")]
@@ -154,16 +153,15 @@ impl Networking {
 
     /// Finish the current networking turn and wait for peers which lag behind
     /// based on their turn number. This is the main backpressure mechanism.
-    pub fn finish_turn(&mut self) -> Option<Duration> {
-        let mut should_sleep = None;
+    pub fn finish_turn(&mut self) -> Option<usize> {
+        let mut maybe_skip_turns = None;
 
         for maybe_connection in &mut self.network_connections {
             if let Some(Connection { n_turns, .. }) = *maybe_connection {
                 if n_turns + self.acceptable_turn_distance < self.n_turns {
-                    should_sleep = Some(Duration::from_millis(
-                        ((self.n_turns - self.acceptable_turn_distance - n_turns)
-                            / self.turn_sleep_distance_ratio) as u64,
-                    ));
+                    maybe_skip_turns = Some(
+                        (self.n_turns - self.acceptable_turn_distance - n_turns) * self.skip_turns_per_turn_head
+                    );
                 }
             }
         }
@@ -184,7 +182,7 @@ impl Networking {
             }
         }
 
-        should_sleep
+        maybe_skip_turns
     }
 
     /// Send queued outbound messages and take incoming queued messages

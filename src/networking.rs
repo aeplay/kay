@@ -31,7 +31,7 @@ pub struct Networking {
     pub n_turns: usize,
     acceptable_turn_distance: usize,
     skip_turns_per_turn_head: usize,
-    network: Vec<&'static str>,
+    network: Vec<String>,
     network_connections: Vec<Option<Connection>>,
     #[cfg(feature = "server")]
     listener: TcpListener,
@@ -42,14 +42,14 @@ impl Networking {
     /// and all peer addresses (including this machine)
     pub fn new(
         machine_id: u8,
-        network: Vec<&'static str>,
+        network: Vec<String>,
         batch_message_bytes: usize,
         acceptable_turn_distance: usize,
         skip_turns_per_turn_head: usize,
     ) -> Networking {
         #[cfg(feature = "server")]
         let listener = {
-            let listener = TcpListener::bind(network[machine_id as usize]).unwrap();
+            let listener = TcpListener::bind(&network[machine_id as usize]).unwrap();
             listener.set_nonblocking(true).unwrap();
             listener
         };

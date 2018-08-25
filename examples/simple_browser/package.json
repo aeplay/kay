@@ -4,6 +4,6 @@
     },
     "dependencies": {
         "parcel-bundler": "^1.9.4",
-        "parcel-plugin-cargo-web": "^0.3.0"
+        "parcel-plugin-cargo-web": "git+https://github.com/aeickhoff/parcel-plugin-cargo-web.git"
     }
 }

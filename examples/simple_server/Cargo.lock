@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "kay"
-version = "0.2.10"
+version = "0.2.15"
 dependencies = [
  "byteorder 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "chunky 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -183,7 +183,7 @@ version = "0.1.0"
 dependencies = [
  "compact 0.2.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "compact_macros 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "kay 0.2.10",
+ "kay 0.2.15",
  "kay_codegen 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -191,7 +191,7 @@ dependencies = [
 name = "kay_simple_example_server"
 version = "0.1.0"
 dependencies = [
- "kay 0.2.10",
+ "kay 0.2.15",
  "kay_simple_example_common 0.1.0",
 ]
 

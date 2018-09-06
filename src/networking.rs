@@ -15,7 +15,8 @@ use stdweb::web::{SocketBinaryType, SocketReadyState, TypedArray, WebSocket};
 use tungstenite::util::NonBlockingError;
 #[cfg(feature = "server")]
 use tungstenite::{
-    accept as websocket_accept, client as websocket_client, Message as WebSocketMessage, WebSocket,
+    accept as websocket_accept, client as websocket_client, HandshakeError,
+    Message as WebSocketMessage, WebSocket,
 };
 #[cfg(feature = "server")]
 use url::Url;
@@ -81,24 +82,44 @@ impl Networking {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
                     println!("Got connection from {}, shaking hands...", addr);
-                    match websocket_accept(stream) {
-                        Ok(mut websocket) => loop {
-                            match websocket.read_message() {
-                                Ok(WebSocketMessage::Binary(data)) => {
-                                    let peer_machine_id = data[0];
-                                    self.network_connections[peer_machine_id as usize] =
-                                        Some(Connection::new(websocket, self.batch_message_bytes));
-                                    println!("...machine ID {} connected!", peer_machine_id);
-                                    break;
+                    let mut handshake_state = Some(websocket_accept(stream));
+                    loop {
+                        handshake_state = match handshake_state {
+                            Some(Ok(mut websocket)) => {
+                                loop {
+                                    match websocket.read_message() {
+                                        Ok(WebSocketMessage::Binary(data)) => {
+                                            let peer_machine_id = data[0];
+                                            self.network_connections[peer_machine_id as usize] =
+                                                Some(Connection::new(
+                                                    websocket,
+                                                    self.batch_message_bytes,
+                                                ));
+                                            println!(
+                                                "...machine ID {} connected!",
+                                                peer_machine_id
+                                            );
+                                            break;
+                                        }
+                                        Ok(_) => {}
+                                        Err(e) => if let Some(real_err) = e.into_non_blocking() {
+                                            println!(
+                                                "Error while expecting first message: {}",
+                                                real_err
+                                            );
+                                            break;
+                                        },
+                                    }
                                 }
-                                Ok(_) => {}
-                                Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                                    println!("Error while expecting first message: {}", real_err);
-                                    break;
-                                },
+                                break;
                             }
-                        },
-                        Err(e) => println!("Error while accepting connection: {}", e),
+                            Some(Err(HandshakeError::Interrupted(s))) => Some(s.handshake()),
+                            Some(Err(HandshakeError::Failure(e))) => {
+                                println!("Error while accepting connection: {}", e);
+                                break;
+                            }
+                            None => break,
+                        }
                     }
                 }
                 Err(ref e) if e.kind() == ::std::io::ErrorKind::WouldBlock => {}
@@ -160,7 +181,8 @@ impl Networking {
             if let Some(Connection { n_turns, .. }) = *maybe_connection {
                 if n_turns + self.acceptable_turn_distance < self.n_turns {
                     maybe_skip_turns = Some(
-                        (self.n_turns - self.acceptable_turn_distance - n_turns) * self.skip_turns_per_turn_head
+                        (self.n_turns - self.acceptable_turn_distance - n_turns)
+                            * self.skip_turns_per_turn_head,
                     );
                 }
             }
@@ -223,8 +245,7 @@ impl Networking {
                     } else {
                         0
                     }
-                })
-                .max()
+                }).max()
                 .unwrap_or(self.n_turns);
 
             if max_n_turns > 1000 + self.n_turns {
@@ -287,10 +308,9 @@ impl Networking {
                         } else {
                             -1
                         }
-                    }
+                    },
                 )
-            })
-            .collect()
+            }).collect()
     }
 
     #[cfg(feature = "browser")]
@@ -364,7 +384,8 @@ impl Connection {
             }
         }
 
-        self.out_batches.push(Vec::with_capacity(self.batch_message_bytes));
+        self.out_batches
+            .push(Vec::with_capacity(self.batch_message_bytes));
 
         match self.websocket.write_pending() {
             Ok(()) => Ok(()),
@@ -517,7 +538,8 @@ impl Connection {
             let mut got_machine_id = got_machine_id_for_listener.borrow_mut();
             if *got_machine_id {
                 in_queue_for_listener.borrow_mut().push_back({
-                    let typed_array: TypedArray<u8> = event.data().into_array_buffer().unwrap().into();
+                    let typed_array: TypedArray<u8> =
+                        event.data().into_array_buffer().unwrap().into();
                     typed_array.to_vec()
                 })
             } else {
@@ -567,7 +589,8 @@ impl Connection {
                 self.websocket.send_bytes(&batch).unwrap();
             }
 
-            self.out_batches.push(Vec::with_capacity(self.batch_message_bytes));
+            self.out_batches
+                .push(Vec::with_capacity(self.batch_message_bytes));
         }
         Ok(())
     }

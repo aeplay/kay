@@ -9,10 +9,6 @@ use super::type_registry::ShortTypeId;
 pub struct MachineID(pub u8);
 
 /// A `RawID` uniquely identifies an `Actor`, or even a `Actor` within a `Swarm`
-#[cfg_attr(
-    feature = "serde-serialization",
-    derive(Serialize, Deserialize)
-)]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RawID {
     /// Used to identify instances within a top-level `Actor`. The main use-case is
@@ -104,6 +100,12 @@ pub enum ParseRawIDError {
     ParseIntError(::std::num::ParseIntError),
 }
 
+impl ::std::fmt::Display for ParseRawIDError {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        ::std::fmt::Debug::fmt(self, f)
+    }
+}
+
 impl ::std::str::FromStr for RawID {
     type Err = ParseRawIDError;
 
@@ -131,6 +133,62 @@ impl ::std::str::FromStr for RawID {
             }
             _ => Err(ParseRawIDError::Format),
         }
+    }
+}
+
+#[cfg(feature = "serde-serialization")]
+use std::marker::PhantomData;
+
+#[cfg(feature = "serde-serialization")]
+impl ::serde::ser::Serialize for RawID {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ::serde::ser::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde-serialization")]
+struct RawIDVisitor {
+    marker: PhantomData<fn() -> RawID>
+}
+
+#[cfg(feature = "serde-serialization")]
+impl RawIDVisitor {
+    fn new() -> Self {
+        RawIDVisitor {
+            marker: PhantomData
+        }
+    }
+}
+
+#[cfg(feature = "serde-serialization")]
+impl<'de> ::serde::de::Visitor<'de> for RawIDVisitor
+{
+    type Value = RawID;
+
+    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        formatter.write_str("A Raw Actor ID")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: ::serde::de::Error,
+    {
+        s.parse().map_err(::serde::de::Error::custom)
+    }
+}
+
+#[cfg(feature = "serde-serialization")]
+impl<'de> ::serde::de::Deserialize<'de> for RawID
+
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: ::serde::de::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(RawIDVisitor::new())
     }
 }
 

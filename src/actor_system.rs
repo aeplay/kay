@@ -49,22 +49,22 @@ pub trait Actor: Compact + StorageAware + 'static {
 
     /// Get the `TypedID` of the local first actor of this kind
     fn local_first(world: &mut World) -> Self::ID {
-        unsafe { Self::ID::from_raw(world.local_first::<Self>()) }
+        Self::ID::from_raw(world.local_first::<Self>())
     }
 
     /// Get the `TypedID` of the global first actor of this kind
     fn global_first(world: &mut World) -> Self::ID {
-        unsafe { Self::ID::from_raw(world.global_first::<Self>()) }
+        Self::ID::from_raw(world.global_first::<Self>())
     }
 
     /// Get the `TypedID` representing a local broadcast to actors of this type
     fn local_broadcast(world: &mut World) -> Self::ID {
-        unsafe { Self::ID::from_raw(world.local_broadcast::<Self>()) }
+        Self::ID::from_raw(world.local_broadcast::<Self>())
     }
 
     /// Get the `TypedID` representing a global broadcast to actors of this type
     fn global_broadcast(world: &mut World) -> Self::ID {
-        unsafe { Self::ID::from_raw(world.global_broadcast::<Self>()) }
+        Self::ID::from_raw(world.global_broadcast::<Self>())
     }
 }
 
@@ -73,7 +73,7 @@ pub trait Actor: Compact + StorageAware + 'static {
 pub trait TraitIDFrom<A: Actor>: TypedID {
     /// Construct the actor trait `TypedID` from an actor's `TypedID`
     fn from(id: <A as Actor>::ID) -> Self {
-        unsafe { Self::from_raw(id.as_raw()) }
+        Self::from_raw(id.as_raw())
     }
 }
 

@@ -1,12 +1,18 @@
 use super::type_registry::ShortTypeId;
 
 /// Identifies a machine in the network
-#[cfg_attr(feature = "serde-serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde-serialization",
+    derive(Serialize, Deserialize)
+)]
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
 pub struct MachineID(pub u8);
 
 /// A `RawID` uniquely identifies an `Actor`, or even a `Actor` within a `Swarm`
-#[cfg_attr(feature = "serde-serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde-serialization",
+    derive(Serialize, Deserialize)
+)]
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RawID {
     /// Used to identify instances within a top-level `Actor`. The main use-case is
@@ -76,7 +82,7 @@ impl ::std::fmt::Debug for RawID {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(
             f,
-            "{}_{}.{}@{}",
+            "{:X}_{:X}.{:X}@{:X}",
             u16::from(self.type_id),
             self.instance_id,
             self.version,
@@ -85,12 +91,64 @@ impl ::std::fmt::Debug for RawID {
     }
 }
 
+impl ::std::fmt::Display for RawID {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        ::std::fmt::Debug::fmt(self, f)
+    }
+}
+
+#[derive(Debug)]
+pub enum ParseRawIDError {
+    Format,
+    InvalidTypeId,
+    ParseIntError(::std::num::ParseIntError),
+}
+
+impl ::std::str::FromStr for RawID {
+    type Err = ParseRawIDError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut parts = s.split(|c| c == '_' || c == '.' || c == '@');
+
+        match (parts.next(), parts.next(), parts.next(), parts.next()) {
+            (Some(type_part), Some(instance_part), Some(version_part), Some(machine_part)) => {
+                let type_id = ShortTypeId::new(
+                    u16::from_str_radix(type_part, 16).map_err(ParseRawIDError::ParseIntError)?,
+                ).ok_or(ParseRawIDError::InvalidTypeId)?;
+                let instance_id = u32::from_str_radix(instance_part, 16)
+                    .map_err(ParseRawIDError::ParseIntError)?;
+                let version =
+                    u8::from_str_radix(version_part, 16).map_err(ParseRawIDError::ParseIntError)?;
+                let machine = MachineID(
+                    u8::from_str_radix(machine_part, 16).map_err(ParseRawIDError::ParseIntError)?,
+                );
+                Ok(RawID {
+                    type_id,
+                    machine,
+                    version,
+                    instance_id,
+                })
+            }
+            _ => Err(ParseRawIDError::Format),
+        }
+    }
+}
+
 /// `TypedID` is a construct on top of a `RawID` that can refer
 /// to a specific kind of actor, or actor trait at compile time
 pub trait TypedID: Copy + Clone + Sized + ::std::fmt::Debug + ::std::hash::Hash {
     /// Get the underlying `RawID`
     fn as_raw(&self) -> RawID;
+    /// Get the underlying `RawID` as a string
+    fn as_raw_string(&self) -> String {
+        self.as_raw().to_string()
+    }
     /// Construct a new `TypedID` from a `RawID` - this implies knowledge
     /// about the type of actor referenced by the `RawID`
-    unsafe fn from_raw(raw: RawID) -> Self;
+    fn from_raw(raw: RawID) -> Self;
+    /// Construct a new `TypedID` from a `RawID` in string form - this implies knowledge
+    /// about the type of actor referenced by the `RawID`
+    fn from_raw_str(raw_str: &str) -> Result<Self, ParseRawIDError> {
+        Ok(Self::from_raw(raw_str.parse()?))
+    }
 }

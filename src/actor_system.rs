@@ -170,7 +170,7 @@ impl ActorSystem {
     /// Register a new dummy Actor type with the system - useful if this Actor
     /// is only really implemented on other node kinds, but ActorIDs need to be
     /// registered in the same order without gaps
-    pub fn register_dummy<A: Actor>(&mut self) {
+    pub fn register_dummy<A: 'static>(&mut self) {
         // allow use of actor id before it is added
         let _actor_id = self.actor_registry.get_or_register::<A>();
     }

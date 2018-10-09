@@ -167,6 +167,14 @@ impl ActorSystem {
         ));
     }
 
+    /// Register a new dummy Actor type with the system - useful if this Actor
+    /// is only really implemented on other node kinds, but ActorIDs need to be
+    /// registered in the same order without gaps
+    pub fn register_dummy<A: Actor>(&mut self) {
+        // allow use of actor id before it is added
+        let _actor_id = self.actor_registry.get_or_register::<A>();
+    }
+
     /// Register a handler for an Actor type and Message type.
     pub fn add_handler<A: Actor, M: Message, F: Fn(&M, &mut A, &mut World) -> Fate + 'static>(
         &mut self,

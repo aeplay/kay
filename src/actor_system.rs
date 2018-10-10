@@ -175,6 +175,12 @@ impl ActorSystem {
         let _actor_id = self.actor_registry.get_or_register::<A>();
     }
 
+    /// Register a message type that might first only appear in an actor trait
+    /// and that might never have an actual handler implementation on this node kind
+    pub fn register_trait_message<M: Message>(&mut self) {
+        self.message_registry.get_or_register::<M>();
+    }
+
     /// Register a handler for an Actor type and Message type.
     pub fn add_handler<A: Actor, M: Message, F: Fn(&M, &mut A, &mut World) -> Fate + 'static>(
         &mut self,

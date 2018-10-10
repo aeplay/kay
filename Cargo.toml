@@ -1,7 +1,7 @@
 [package]
 name = "kay"
 description = "Experimental high-performance actor system framework for Rust"
-version = "0.2.23"
+version = "0.2.24"
 authors = ["Anselm Eickhoff <anselm.eickhoff@gmail.com>"]
 repository = "https://github.com/aeickhoff/kay"
 license = "MIT"

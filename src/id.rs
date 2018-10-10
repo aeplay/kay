@@ -1,4 +1,6 @@
 use super::type_registry::ShortTypeId;
+use super::World;
+use actor::ActorOrActorTrait;
 
 /// Identifies a machine in the network
 #[cfg_attr(
@@ -8,11 +10,11 @@ use super::type_registry::ShortTypeId;
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
 pub struct MachineID(pub u8);
 
-/// A `RawID` uniquely identifies an `Actor`, or even a `Actor` within a `Swarm`
+/// A `RawID` uniquely identifies an `Actor`, or even a `Actor` within a `InstanceStore`
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RawID {
     /// Used to identify instances within a top-level `Actor`. The main use-case is
-    /// `Swarm` identifying and dispatching to its `Instances` using this field
+    /// `InstanceStore` identifying and dispatching to its `Instances` using this field
     pub instance_id: u32,
     /// An ID for the type of the identified `Actor`, used to dispatch messages
     /// to the message handling functions registered for this type
@@ -151,21 +153,20 @@ impl ::serde::ser::Serialize for RawID {
 
 #[cfg(feature = "serde-serialization")]
 struct RawIDVisitor {
-    marker: PhantomData<fn() -> RawID>
+    marker: PhantomData<fn() -> RawID>,
 }
 
 #[cfg(feature = "serde-serialization")]
 impl RawIDVisitor {
     fn new() -> Self {
         RawIDVisitor {
-            marker: PhantomData
+            marker: PhantomData,
         }
     }
 }
 
 #[cfg(feature = "serde-serialization")]
-impl<'de> ::serde::de::Visitor<'de> for RawIDVisitor
-{
+impl<'de> ::serde::de::Visitor<'de> for RawIDVisitor {
     type Value = RawID;
 
     fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
@@ -181,9 +182,7 @@ impl<'de> ::serde::de::Visitor<'de> for RawIDVisitor
 }
 
 #[cfg(feature = "serde-serialization")]
-impl<'de> ::serde::de::Deserialize<'de> for RawID
-
-{
+impl<'de> ::serde::de::Deserialize<'de> for RawID {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: ::serde::de::Deserializer<'de>,
@@ -195,6 +194,9 @@ impl<'de> ::serde::de::Deserialize<'de> for RawID
 /// `TypedID` is a construct on top of a `RawID` that can refer
 /// to a specific kind of actor, or actor trait at compile time
 pub trait TypedID: Copy + Clone + Sized + ::std::fmt::Debug + ::std::hash::Hash {
+    /// The Actor or ActorTrait that TypedIDs of this kind refer to
+    type Target: ActorOrActorTrait;
+
     /// Get the underlying `RawID`
     fn as_raw(&self) -> RawID;
     /// Get the underlying `RawID` as a string
@@ -208,5 +210,25 @@ pub trait TypedID: Copy + Clone + Sized + ::std::fmt::Debug + ::std::hash::Hash 
     /// about the type of actor referenced by the `RawID`
     fn from_raw_str(raw_str: &str) -> Result<Self, ParseRawIDError> {
         Ok(Self::from_raw(raw_str.parse()?))
+    }
+
+    /// Get the `TypedID` of the local first actor of this kind
+    fn local_first(world: &mut World) -> Self {
+        Self::from_raw(world.local_first::<Self::Target>())
+    }
+
+    /// Get the `TypedID` of the global first actor of this kind
+    fn global_first(world: &mut World) -> Self {
+        Self::from_raw(world.global_first::<Self::Target>())
+    }
+
+    /// Get the `TypedID` representing a local broadcast to actors of this type
+    fn local_broadcast(world: &mut World) -> Self {
+        Self::from_raw(world.local_broadcast::<Self::Target>())
+    }
+
+    /// Get the `TypedID` representing a global broadcast to actors of this type
+    fn global_broadcast(world: &mut World) -> Self {
+        Self::from_raw(world.global_broadcast::<Self::Target>())
     }
 }

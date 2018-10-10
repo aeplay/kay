@@ -109,8 +109,8 @@ impl CounterID {
     }
     pub fn spawn(initial_count: u32, world: &mut World) -> Self {
         let id = unsafe { CounterID::from_raw(world.allocate_instance_id::<Counter>()) };
-        let swarm = world.local_broadcast::<Counter>();
-        world.send(swarm, MSG_Counter_spawn(id, initial_count));
+        let instance_store = world.local_broadcast::<Counter>();
+        world.send(instance_store, MSG_Counter_spawn(id, initial_count));
         id
     }
 }
@@ -126,8 +126,8 @@ struct MSG_Counter_spawn(pub CounterID, pub u32);
 impl ServerLoggerID {
     pub fn spawn(counter_id: CounterID, world: &mut World) -> Self {
         let id = unsafe { ServerLoggerID::from_raw(world.allocate_instance_id::<ServerLogger>()) };
-        let swarm = world.local_broadcast::<ServerLogger>();
-        world.send(swarm, MSG_ServerLogger_spawn(id, counter_id));
+        let instance_store = world.local_broadcast::<ServerLogger>();
+        world.send(instance_store, MSG_ServerLogger_spawn(id, counter_id));
         id
     }
 }
@@ -138,8 +138,8 @@ impl BrowserLoggerID {
     pub fn spawn(counter_id: CounterID, world: &mut World) -> Self {
         let id =
             unsafe { BrowserLoggerID::from_raw(world.allocate_instance_id::<BrowserLogger>()) };
-        let swarm = world.local_broadcast::<BrowserLogger>();
-        world.send(swarm, MSG_BrowserLogger_spawn(id, counter_id));
+        let instance_store = world.local_broadcast::<BrowserLogger>();
+        world.send(instance_store, MSG_BrowserLogger_spawn(id, counter_id));
         id
     }
 }

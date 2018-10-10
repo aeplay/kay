@@ -209,14 +209,18 @@ impl Networking {
 
     /// Send queued outbound messages and take incoming queued messages
     /// and forward them to their local target recipient(s)
-    pub fn send_and_receive(&mut self, inboxes: &mut [Option<Inbox>]) {
+    pub fn send_and_receive(
+        &mut self,
+        inboxes: &mut [Option<Inbox>],
+        implementors: &mut [Option<Vec<ShortTypeId>>],
+    ) {
         self.connect();
 
         for (machine_id, maybe_connection) in self.network_connections.iter_mut().enumerate() {
             let closed_reason = if let Some(ref mut connection) = *maybe_connection {
                 match connection
                     .try_send_pending()
-                    .and_then(|_| connection.try_receive(inboxes))
+                    .and_then(|_| connection.try_receive(inboxes, implementors))
                 {
                     Ok(()) => None,
                     Err(err) => Some(err),
@@ -400,12 +404,14 @@ impl Connection {
     pub fn try_receive(
         &mut self,
         inboxes: &mut [Option<Inbox>],
+        implementors: &mut [Option<Vec<ShortTypeId>>],
     ) -> Result<(), ::tungstenite::Error> {
         loop {
             let blocked = match self.websocket.read_message() {
                 Ok(WebSocketMessage::Binary(data)) => dispatch_batch(
                     &data,
                     inboxes,
+                    implementors,
                     &mut self.n_turns,
                     &mut self.n_turns_since_own_turn,
                 ),
@@ -428,6 +434,7 @@ impl Connection {
 fn dispatch_batch(
     data: &[u8],
     inboxes: &mut [Option<Inbox>],
+    implementors: &mut [Option<Vec<ShortTypeId>>],
     n_turns: &mut usize,
     n_turns_since_own_turn: &mut usize,
 ) -> bool {
@@ -446,6 +453,7 @@ fn dispatch_batch(
         let wants_to_wait = dispatch_message(
             &data[pos..(pos + message_size as usize)],
             inboxes,
+            implementors,
             n_turns,
             n_turns_since_own_turn,
         );
@@ -460,6 +468,7 @@ fn dispatch_batch(
 fn dispatch_message(
     data: &[u8],
     inboxes: &mut [Option<Inbox>],
+    implementors: &mut [Option<Vec<ShortTypeId>>],
     n_turns: &mut usize,
     n_turns_since_own_turn: &mut usize,
 ) -> bool {
@@ -477,26 +486,29 @@ fn dispatch_message(
             (&data[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
 
         unsafe {
-            // #[cfg(feature = "browser")]
-            // {
-            //     let debugmsg = format!(
-            //         "Receiving packet for actor {:?}. Data: {:?}",
-            //         (*recipient_id),
-            //         data
-            //     );
-            //     console!(log, debugmsg);
-            // }
             if let Some(ref mut inbox) = inboxes[(*recipient_id).type_id.as_usize()] {
                 inbox.put_raw(&data);
             } else {
-                // #[cfg(feature = "browser")]
-                // {
-                //     console!(error, "Yeah that didn't work (no inbox)")
-                // }
-                panic!(
-                    "No inbox for {:?} (coming from network)",
-                    (*recipient_id).type_id.as_usize()
-                )
+                if let Some(implementors) =
+                    implementors[(*recipient_id).type_id.as_usize()].as_ref()
+                {
+                    for implementor_type_id in implementors {
+                        if let Some(inbox) = inboxes[implementor_type_id.as_usize()].as_mut() {
+                            inbox.put_raw(&data);
+                        } else {
+                            panic!(
+                                "No inbox for actor type {}, trait type {} (coming from network)",
+                                implementor_type_id.as_usize(),
+                                (*recipient_id).type_id.as_usize()
+                            );
+                        }
+                    }
+                } else {
+                    panic!(
+                        "No inbox for actor type {} - or no implementors (coming from network)",
+                        (*recipient_id).type_id.as_usize()
+                    )
+                }
             }
         }
 
@@ -595,7 +607,11 @@ impl Connection {
         Ok(())
     }
 
-    pub fn try_receive(&mut self, inboxes: &mut [Option<Inbox>]) -> Result<(), ::std::io::Error> {
+    pub fn try_receive(
+        &mut self,
+        inboxes: &mut [Option<Inbox>],
+        implementors: &mut [Option<Vec<ShortTypeId>>],
+    ) -> Result<(), ::std::io::Error> {
         if let Ok(mut in_queue) = self.in_queue.try_borrow_mut() {
             //console!(log, "Before drain!");
             for batch in in_queue.drain(..) {
@@ -603,6 +619,7 @@ impl Connection {
                 dispatch_batch(
                     &batch,
                     inboxes,
+                    implementors,
                     &mut self.n_turns,
                     &mut self.n_turns_since_own_turn,
                 );

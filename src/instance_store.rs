@@ -1,5 +1,6 @@
 //! Tools for dealing with large amounts of identical actors
-use super::actor_system::{Actor, World};
+use super::actor::Actor;
+use super::actor_system::World;
 use super::chunky;
 use super::id::{broadcast_instance_id, RawID, TypedID};
 use super::messaging::{Fate, Message, Packet};
@@ -7,13 +8,13 @@ use super::slot_map::{SlotIndices, SlotMap};
 use compact::Compact;
 use std::marker::PhantomData;
 
-/// A container-like actor, housing many instances of identical behaviour.
+/// A container housing state of many instances of one type.
 ///
 /// Offers efficient storage of and broadcasting to its instances.
 ///
-/// New instances can be added to a swarm using [`Create`](struct.Create.html)
+/// New instances can be added to a instance_store using [`Create`](struct.Create.html)
 /// or [`CreateWith`](struct.CreateWith.html).
-pub struct Swarm<Actor> {
+pub struct InstanceStore<Actor> {
     instances: chunky::MultiArena<chunky::HeapHandler>,
     slot_map: SlotMap,
     n_instances: chunky::Value<usize, chunky::HeapHandler>,
@@ -22,12 +23,12 @@ pub struct Swarm<Actor> {
 
 const CHUNK_SIZE: usize = 1024 * 1024 * 16;
 
-impl<A: Actor + Clone> Swarm<A> {
-    /// Create an empty `Swarm`.
+impl<A: Actor + Clone> InstanceStore<A> {
+    /// Create an empty `InstanceStore`.
     #[cfg_attr(feature = "cargo-clippy", allow(new_without_default))]
     pub fn new() -> Self {
         let ident: chunky::Ident = unsafe { ::std::intrinsics::type_name::<A>().into() };
-        Swarm {
+        InstanceStore {
             instances: chunky::MultiArena::new(
                 ident.sub("instances"),
                 CHUNK_SIZE,
@@ -255,7 +256,7 @@ impl<A: Actor + Clone> Swarm<A> {
 }
 
 use super::actor_system::InstancesCountable;
-impl<A: Actor> InstancesCountable for Swarm<A> {
+impl<A: Actor> InstancesCountable for InstanceStore<A> {
     fn instance_count(&self) -> usize {
         *self.n_instances
     }

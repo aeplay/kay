@@ -1,81 +1,13 @@
+use super::actor::{Actor, ActorOrActorTrait};
 use super::id::{MachineID, RawID, TypedID};
 use super::inbox::{DispatchablePacket, Inbox};
+use super::instance_store::InstanceStore;
 use super::messaging::{Fate, Message, Packet};
 use super::networking::Networking;
-use super::swarm::Swarm;
 use super::type_registry::{ShortTypeId, TypeRegistry};
-use compact::Compact;
-use std::mem::size_of;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+
 use std::collections::HashMap;
-
-/// Trait that allows dynamically sized `Actor` instances to provide
-/// a "typical size" hint to optimize their storage in a `Swarm`
-pub trait StorageAware: Sized {
-    /// The default implementation just returns the static size of the implementing type
-    fn typical_size() -> usize {
-        let size = size_of::<Self>();
-        if size == 0 {
-            1
-        } else {
-            size
-        }
-    }
-}
-impl<T> StorageAware for T {}
-
-/// Trait that Actors instance have to implement for a [`Swarm`](struct.Swarm.html)
-/// so their internally stored instance `RawID` can be gotten and set.
-///
-/// Furthermore, an `Actor` has to implement [`Compact`](../../compact), so a `Swarm`
-/// can compactly store each `Actor`'s potentially dynamically-sized state.
-///
-/// This trait can is auto-derived when using the
-/// [`kay_codegen`](../../kay_codegen/index.html) build script.
-pub trait Actor: Compact + StorageAware + 'static {
-    /// The unique `TypedID` of this actor
-    type ID: TypedID;
-    /// Get `TypedID` of this actor
-    fn id(&self) -> Self::ID;
-    /// Set the full RawID (Actor type id + instance id)
-    /// of this actor (only used internally by `Swarm`)
-    unsafe fn set_id(&mut self, id: RawID);
-
-    /// Get the id of this actor as an actor trait `TypedID`
-    /// (available if the actor implements the corresponding trait)
-    fn id_as<TargetID: TraitIDFrom<Self>>(&self) -> TargetID {
-        TargetID::from(self.id())
-    }
-
-    /// Get the `TypedID` of the local first actor of this kind
-    fn local_first(world: &mut World) -> Self::ID {
-        Self::ID::from_raw(world.local_first::<Self>())
-    }
-
-    /// Get the `TypedID` of the global first actor of this kind
-    fn global_first(world: &mut World) -> Self::ID {
-        Self::ID::from_raw(world.global_first::<Self>())
-    }
-
-    /// Get the `TypedID` representing a local broadcast to actors of this type
-    fn local_broadcast(world: &mut World) -> Self::ID {
-        Self::ID::from_raw(world.local_broadcast::<Self>())
-    }
-
-    /// Get the `TypedID` representing a global broadcast to actors of this type
-    fn global_broadcast(world: &mut World) -> Self::ID {
-        Self::ID::from_raw(world.global_broadcast::<Self>())
-    }
-}
-
-/// Helper trait that signifies that an actor's `TypedID` can be converted
-/// to an actor trait `TypedID` if that actor implements the corresponding trait.
-pub trait TraitIDFrom<A: Actor>: TypedID {
-    /// Construct the actor trait `TypedID` from an actor's `TypedID`
-    fn from(id: <A as Actor>::ID) -> Self {
-        Self::from_raw(id.as_raw())
-    }
-}
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 struct Dispatcher {
     function: Box<Fn(*const (), &mut World)>,
@@ -98,8 +30,9 @@ pub struct ActorSystem {
     /// Flag that the system is shutting down
     pub shutting_down: bool,
     inboxes: [Option<Inbox>; MAX_RECIPIENT_TYPES],
+    implementors: [Option<Vec<ShortTypeId>>; MAX_RECIPIENT_TYPES],
     actor_registry: TypeRegistry,
-    swarms: [Option<*mut u8>; MAX_RECIPIENT_TYPES],
+    instance_stores: [Option<*mut u8>; MAX_RECIPIENT_TYPES],
     message_registry: TypeRegistry,
     dispatchers: [[Option<Dispatcher>; MAX_MESSAGE_TYPES]; MAX_RECIPIENT_TYPES],
     actors_as_countables: Vec<(String, *const InstancesCountable)>,
@@ -131,9 +64,10 @@ impl ActorSystem {
             panic_happened: false,
             shutting_down: false,
             inboxes: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
+            implementors: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
             actor_registry: TypeRegistry::new(),
             message_registry: TypeRegistry::new(),
-            swarms: [None; MAX_RECIPIENT_TYPES],
+            instance_stores: [None; MAX_RECIPIENT_TYPES],
             dispatchers: unsafe {
                 make_array!(MAX_RECIPIENT_TYPES, |_| make_array!(
                     MAX_MESSAGE_TYPES,
@@ -155,10 +89,10 @@ impl ActorSystem {
         self.inboxes[actor_id.as_usize()] =
             Some(Inbox::new(&::chunky::Ident::from(actor_name).sub("inbox")));
         // ...but still make sure it is only added once
-        assert!(self.swarms[actor_id.as_usize()].is_none());
+        assert!(self.instance_stores[actor_id.as_usize()].is_none());
         // Store pointer to the actor
-        let actor_pointer = Box::into_raw(Box::new(Swarm::<A>::new()));
-        self.swarms[actor_id.as_usize()] = Some(actor_pointer as *mut u8);
+        let actor_pointer = Box::into_raw(Box::new(InstanceStore::<A>::new()));
+        self.instance_stores[actor_id.as_usize()] = Some(actor_pointer as *mut u8);
         self.actors_as_countables.push((
             self.actor_registry
                 .get_name(self.actor_registry.get::<A>())
@@ -168,17 +102,33 @@ impl ActorSystem {
     }
 
     /// Register a new dummy Actor type with the system - useful if this Actor
-    /// is only really implemented on other node kinds, but ActorIDs need to be
+    /// is only really implemented on other node kinds, but Actor type IDs need to be
     /// registered in the same order without gaps
-    pub fn register_dummy<A: 'static>(&mut self) {
-        // allow use of actor id before it is added
-        let _actor_id = self.actor_registry.get_or_register::<A>();
+    pub fn register_dummy<D: 'static>(&mut self) {
+        let _actor_id = self.actor_registry.get_or_register::<D>();
+    }
+
+    /// Register a trait to give it a type ID and be able to send broadcast messages
+    /// to its implementors
+    pub fn register_trait<T: ActorOrActorTrait>(&mut self) {
+        let trait_id = self.actor_registry.get_or_register::<T>();
+        self.implementors[trait_id.as_usize()].get_or_insert_with(Vec::new);
     }
 
     /// Register a message type that might first only appear in an actor trait
     /// and that might never have an actual handler implementation on this node kind
     pub fn register_trait_message<M: Message>(&mut self) {
         self.message_registry.get_or_register::<M>();
+    }
+
+    /// Register an actor as an implementor of an actor trait, so it can receive broadcast
+    /// messages directed at all implementors of the trait
+    pub fn register_implementor<A: Actor, T: ActorOrActorTrait>(&mut self) {
+        let trait_id = self.actor_registry.get_or_register::<T>();
+        let actor_id = self.actor_registry.get::<A>();
+        self.implementors[trait_id.as_usize()]
+            .get_or_insert_with(Vec::new)
+            .push(actor_id);
     }
 
     /// Register a handler for an Actor type and Message type.
@@ -196,8 +146,9 @@ impl ActorSystem {
         // );
 
         #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
-        let swarm_ptr =
-            self.swarms[actor_id.as_usize()].expect("Actor not added yet") as *mut Swarm<A>;
+        let instance_store_ptr = self.instance_stores[actor_id.as_usize()]
+            .expect("Actor not added yet")
+            as *mut InstanceStore<A>;
 
         self.dispatchers[actor_id.as_usize()][message_id.as_usize()] = Some(Dispatcher {
             function: Box::new(move |packet_ptr: *const (), world: &mut World| unsafe {
@@ -209,7 +160,7 @@ impl ActorSystem {
                 //     ::std::intrinsics::type_name::<M>()
                 // );
 
-                (*swarm_ptr).dispatch_packet(packet, &handler, world);
+                (*instance_store_ptr).dispatch_packet(packet, &handler, world);
 
                 // TODO: not sure if this is the best place to drop the message
                 ::std::ptr::drop_in_place(packet_ptr as *mut Packet<M>);
@@ -231,15 +182,16 @@ impl ActorSystem {
         //          unsafe { ::std::intrinsics::type_name::<M>() });
 
         #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
-        let swarm_ptr =
-            self.swarms[actor_id.as_usize()].expect("Actor not added yet") as *mut Swarm<A>;
+        let instance_store_ptr = self.instance_stores[actor_id.as_usize()]
+            .expect("Actor not added yet")
+            as *mut InstanceStore<A>;
 
         self.dispatchers[actor_id.as_usize()][message_id.as_usize()] = Some(Dispatcher {
             function: Box::new(move |packet_ptr: *const (), world: &mut World| unsafe {
                 let packet = &*(packet_ptr as *const Packet<M>);
 
                 let mut instance = constructor(&packet.message, world);
-                (*swarm_ptr).add_manually_with_id(&mut instance, instance.id().as_raw());
+                (*instance_store_ptr).add_manually_with_id(&mut instance, instance.id().as_raw());
 
                 ::std::mem::forget(instance);
 
@@ -271,9 +223,26 @@ impl ActorSystem {
         if to_here || global {
             if let Some(inbox) = self.inboxes[recipient.type_id.as_usize()].as_mut() {
                 inbox.put(packet, &self.message_registry);
+                return; // A weird replacement for 'else', helps with mut borrows of self.inboxes
+            }
+
+            if let Some(implementors) = self.implementors[recipient.type_id.as_usize()].as_ref() {
+                for implementor_type_id in implementors {
+                    if let Some(inbox) = self.inboxes[implementor_type_id.as_usize()].as_mut() {
+                        inbox.put(packet.clone(), &self.message_registry);
+                    } else {
+                        panic!(
+                            "{}:{} has no inbox for {}",
+                            self.actor_registry.get_name(*implementor_type_id),
+                            self.actor_registry.get_name(recipient.type_id),
+                            self.message_registry
+                                .get_name(self.message_registry.get::<M>(),)
+                        );
+                    }
+                }
             } else {
                 panic!(
-                    "{} has no inbox for {}",
+                    "{} has no inbox for {} - or the trait has no implementors",
                     self.actor_registry.get_name(recipient.type_id),
                     self.message_registry
                         .get_name(self.message_registry.get::<M>(),)
@@ -283,11 +252,11 @@ impl ActorSystem {
     }
 
     /// Get the base RawID of an Actor type
-    pub fn id<A: Actor>(&mut self) -> RawID {
+    pub fn id<A: ActorOrActorTrait>(&mut self) -> RawID {
         RawID::new(self.short_id::<A>(), 0, self.networking.machine_id, 0)
     }
 
-    fn short_id<A: Actor>(&mut self) -> ShortTypeId {
+    fn short_id<A: ActorOrActorTrait>(&mut self) -> ShortTypeId {
         self.actor_registry.get_or_register::<A>()
     }
 
@@ -305,8 +274,7 @@ impl ActorSystem {
                     } in inbox.drain()
                     {
                         if let Some(handler) = self.dispatchers[recipient_type.as_usize()]
-                            [message_type.as_usize()]
-                            .as_mut()
+                            [message_type.as_usize()].as_mut()
                         {
                             if handler.critical || !self.panic_happened {
                                 (handler.function)(packet_ptr, &mut world);
@@ -359,7 +327,8 @@ impl ActorSystem {
     /// Send queued outbound messages and take incoming queued messages
     /// and forward them to their local target recipient(s)
     pub fn networking_send_and_receive(&mut self) {
-        self.networking.send_and_receive(&mut self.inboxes);
+        self.networking
+            .send_and_receive(&mut self.inboxes, &mut self.implementors);
     }
 
     /// Finish the current networking turn and wait for peers which lag behind
@@ -390,22 +359,28 @@ impl ActorSystem {
         self.actors_as_countables
             .iter()
             .map(|&(ref actor_name, countable_ptr)| {
-                (actor_name.split("::").last().unwrap().replace(">", ""),
-                    unsafe { (*countable_ptr).instance_count()})
-            })
-            .collect()
+                (
+                    actor_name.split("::").last().unwrap().replace(">", ""),
+                    unsafe { (*countable_ptr).instance_count() },
+                )
+            }).collect()
     }
 
     /// Get number of processed messages per message type since last reset
     pub fn get_message_statistics(&self) -> HashMap<String, usize> {
-        self.message_statistics.iter().enumerate().filter_map(|(i, n_sent)|
-            if *n_sent > 0 {
-                let name = self.message_registry.get_name(ShortTypeId::new(i as u16).unwrap());
-                Some((name.to_owned(), *n_sent))
-            } else {
-                None
-            }
-        ).collect()
+        self.message_statistics
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n_sent)| {
+                if *n_sent > 0 {
+                    let name = self
+                        .message_registry
+                        .get_name(ShortTypeId::new(i as u16).unwrap());
+                    Some((name.to_owned(), *n_sent))
+                } else {
+                    None
+                }
+            }).collect()
     }
 
     /// Reset count of processed messages
@@ -418,15 +393,23 @@ impl ActorSystem {
         #[cfg(feature = "server")]
         let connection_queue_length = None;
         #[cfg(feature = "browser")]
-        let connection_queue_length = self.networking.main_out_connection().map(|connection|
-            ("NETWORK QUEUE".to_owned(), connection.in_queue_len())
-        );
+        let connection_queue_length = self
+            .networking
+            .main_out_connection()
+            .map(|connection| ("NETWORK QUEUE".to_owned(), connection.in_queue_len()));
 
-        self.inboxes.iter().enumerate().filter_map(|(i, maybe_inbox)| maybe_inbox.as_ref().map(|inbox| {
-            let actor_name = self.actor_registry.get_name(ShortTypeId::new(i as u16).unwrap());
-            (actor_name.to_owned(), inbox.len())
-        }))
-        .chain(connection_queue_length).collect()
+        self.inboxes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, maybe_inbox)| {
+                maybe_inbox.as_ref().map(|inbox| {
+                    let actor_name = self
+                        .actor_registry
+                        .get_name(ShortTypeId::new(i as u16).unwrap());
+                    (actor_name.to_owned(), inbox.len())
+                })
+            }).chain(connection_queue_length)
+            .collect()
     }
 }
 
@@ -449,37 +432,37 @@ impl World {
     }
 
     /// Get the RawID of the first machine-local instance of an actor.
-    pub fn local_first<A: Actor>(&mut self) -> RawID {
+    pub fn local_first<A: ActorOrActorTrait>(&mut self) -> RawID {
         unsafe { &mut *self.0 }.id::<A>()
     }
 
     /// Get the RawID of the first instance of an actor on machine 0
-    pub fn global_first<A: Actor>(&mut self) -> RawID {
+    pub fn global_first<A: ActorOrActorTrait>(&mut self) -> RawID {
         let mut id = unsafe { &mut *self.0 }.id::<A>();
         id.machine = MachineID(0);
         id
     }
 
     /// Get the RawID for a broadcast to all machine-local instances of an actor.
-    pub fn local_broadcast<A: Actor>(&mut self) -> RawID {
+    pub fn local_broadcast<A: ActorOrActorTrait>(&mut self) -> RawID {
         unsafe { &mut *self.0 }.id::<A>().local_broadcast()
     }
 
     /// Get the RawID for a global broadcast to all instances of an actor on all machines.
-    pub fn global_broadcast<A: Actor>(&mut self) -> RawID {
+    pub fn global_broadcast<A: ActorOrActorTrait>(&mut self) -> RawID {
         unsafe { &mut *self.0 }.id::<A>().global_broadcast()
     }
 
     /// Synchronously allocate a instance id for a instance
-    /// that will later manually be added to a Swarm
+    /// that will later manually be added to a InstanceStore
     pub fn allocate_instance_id<A: 'static + Actor>(&mut self) -> RawID {
         let system: &mut ActorSystem = unsafe { &mut *self.0 };
-        let swarm = unsafe {
+        let instance_store = unsafe {
             #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
-            &mut *(system.swarms[system.actor_registry.get::<A>().as_usize()]
-                .expect("Subactor type not found.") as *mut Swarm<A>)
+            &mut *(system.instance_stores[system.actor_registry.get::<A>().as_usize()]
+                .expect("Subactor type not found.") as *mut InstanceStore<A>)
         };
-        unsafe { swarm.allocate_id(self.local_broadcast::<A>()) }
+        unsafe { instance_store.allocate_id(self.local_broadcast::<A>()) }
     }
 
     /// Get the id of the machine that we're currently in

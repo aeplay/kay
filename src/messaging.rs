@@ -4,7 +4,7 @@ use super::id::RawID;
 /// Return type of message handling functions, signifying if
 /// an `Actor`/`Actor` should live on after receiving a certain message type.
 ///
-/// Note: so far only has an effect on `Actor`s in `Swarm`s
+/// Note: so far only has an effect on `Actor`s in `InstanceStore`s
 pub enum Fate {
     /// Means: the `Actor`/`Actor` should live on
     Live,
@@ -23,7 +23,7 @@ impl<T: Compact + 'static> Message for T {}
 #[derive(Compact, Clone)]
 #[repr(C)]
 pub struct Packet<M: Message> {
-    /// RawID of the `Actor`/`Actor` that should receive this message
+    /// RawID of the `Actor` instance (or group of instances) that should receive this message
     pub recipient_id: RawID,
     /// The message itself
     pub message: M,

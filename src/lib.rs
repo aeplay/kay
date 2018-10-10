@@ -4,7 +4,7 @@
 //! otherwise completely isloated from each other. Actors can only mutate their own state.
 //!
 //! Have a look at [`ActorSystem`](struct.ActorSystem.html), [`World`](struct.World.html)
-//! and [`Swarm`](swarm/struct.Swarm.html) to understand the main abstractions.
+//! and [`InstanceStore`](instance_store/struct.InstanceStore.html) to understand the main abstractions.
 //!
 //! Current Shortcomings:
 //!
@@ -35,17 +35,20 @@ extern crate serde_derive;
 #[cfg(feature = "serde-serialization")]
 extern crate serde;
 
+mod actor;
 mod actor_system;
 mod external;
 mod id;
 mod inbox;
+mod instance_store;
 mod messaging;
 mod networking;
 mod slot_map;
-mod swarm;
+mod storage_aware;
 mod type_registry;
 
-pub use self::actor_system::{Actor, ActorSystem, TraitIDFrom, World};
+pub use self::actor::{Actor, ActorOrActorTrait, TraitIDFrom};
+pub use self::actor_system::{ActorSystem, World};
 pub use self::external::External;
 pub use self::id::{MachineID, RawID, TypedID};
 pub use self::messaging::{Fate, Message, Packet};

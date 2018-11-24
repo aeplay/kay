@@ -411,6 +411,13 @@ impl ActorSystem {
             }).chain(connection_queue_length)
             .collect()
     }
+
+    /// Get a mapping from type ids to actor type names for external ID debugging
+    pub fn get_actor_type_id_to_name_mapping(&self) -> HashMap<u16, String> {
+        self.actor_registry.short_ids_to_names.iter().map(|(short_id, name)|
+            (short_id.as_u16(), name.clone())
+        ).collect()
+    }
 }
 
 /// Gives limited access to an [`ActorSystem`](struct.ActorSystem.html) (typically

@@ -18,6 +18,10 @@ impl ShortTypeId {
     pub fn as_usize(&self) -> usize {
         self.0.get() as usize
     }
+
+    pub fn as_u16(&self) -> u16 {
+        self.0.get()
+    }
 }
 
 impl From<ShortTypeId> for u16 {
@@ -29,7 +33,7 @@ impl From<ShortTypeId> for u16 {
 pub struct TypeRegistry {
     next_short_id: ShortTypeId,
     long_to_short_ids: HashMap<u64, ShortTypeId>,
-    short_ids_to_names: HashMap<ShortTypeId, String>,
+    pub short_ids_to_names: HashMap<ShortTypeId, String>,
 }
 
 impl TypeRegistry {

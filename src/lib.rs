@@ -15,8 +15,6 @@
 #![feature(optin_builtin_traits)]
 #![feature(specialization)]
 #![feature(box_syntax)]
-#![feature(nonzero)]
-#![feature(tcpstream_connect_timeout)]
 extern crate chunky;
 extern crate compact;
 #[macro_use]

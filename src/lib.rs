@@ -1,15 +1,3 @@
-//! `Kay` is a high-performance actor system, suitable for simulating millions of entities.
-//!
-//! In `Kay`, actors concurrently send and receive asynchronous messages, but are
-//! otherwise completely isloated from each other. Actors can only mutate their own state.
-//!
-//! Have a look at [`ActorSystem`](struct.ActorSystem.html), [`World`](struct.World.html)
-//! and [`InstanceStore`](instance_store/struct.InstanceStore.html) to understand the main abstractions.
-//!
-//! Current Shortcomings:
-//!
-//! * Can't deal with messages to dead actors (undefined, often very confusing behaviour)
-
 #![warn(missing_docs)]
 #![feature(core_intrinsics)]
 #![feature(optin_builtin_traits)]
@@ -33,15 +21,23 @@ extern crate serde_derive;
 #[cfg(feature = "serde-serialization")]
 extern crate serde;
 
+macro_rules! make_array {
+    ($n:expr, $constructor:expr) => {{
+        let mut items: [_; $n] = ::std::mem::uninitialized();
+        for (i, place) in items.iter_mut().enumerate() {
+            ::std::ptr::write(place, $constructor(i));
+        }
+        items
+    }};
+}
+
 mod actor;
 mod actor_system;
 mod external;
 mod id;
-mod inbox;
-mod instance_store;
+mod class;
 mod messaging;
 mod networking;
-mod slot_map;
 mod storage_aware;
 mod type_registry;
 

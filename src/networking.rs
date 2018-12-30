@@ -1,7 +1,8 @@
-use super::id::{broadcast_machine_id, MachineID, RawID};
-use super::inbox::Inbox;
-use super::messaging::{Message, Packet};
-use super::type_registry::ShortTypeId;
+use crate::class::Class;
+use crate::id::{broadcast_machine_id, MachineID, RawID};
+use crate::class::inbox::Inbox;
+use crate::messaging::{Message, Packet};
+use crate::type_registry::ShortTypeId;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use compact::Compact;
 use std::collections::HashMap;
@@ -20,15 +21,9 @@ use tungstenite::{
 };
 #[cfg(feature = "server")]
 use url::Url;
-
-/// Represents all networking environment and networking state
-/// of an `ActorSystem`
 pub struct Networking {
-    /// The machine index of this machine within the network of peers
     pub machine_id: MachineID,
     batch_message_bytes: usize,
-    /// The current network turn this machine is in. Used to keep track
-    /// if this machine lags behind or runs fast compared to its peers
     pub n_turns: usize,
     acceptable_turn_distance: usize,
     skip_turns_per_turn_head: usize,
@@ -39,8 +34,6 @@ pub struct Networking {
 }
 
 impl Networking {
-    /// Create network environment based on this machines id/index
-    /// and all peer addresses (including this machine)
     pub fn new(
         machine_id: u8,
         network: Vec<String>,
@@ -69,7 +62,6 @@ impl Networking {
     }
 
     #[cfg(feature = "server")]
-    /// Try to connect to peers in the network
     pub fn connect(&mut self) {
         // first wait for a larger machine_id to connect
         if self
@@ -154,7 +146,6 @@ impl Networking {
     }
 
     #[cfg(feature = "browser")]
-    /// Connect to all peers in the network
     pub fn connect(&mut self) {
         for (machine_id, address) in self.network.iter().enumerate() {
             if machine_id != self.machine_id.0 as usize {
@@ -172,8 +163,6 @@ impl Networking {
         }
     }
 
-    /// Finish the current networking turn and wait for peers which lag behind
-    /// based on their turn number. This is the main backpressure mechanism.
     pub fn finish_turn(&mut self) -> Option<usize> {
         let mut maybe_skip_turns = None;
 
@@ -207,11 +196,9 @@ impl Networking {
         maybe_skip_turns
     }
 
-    /// Send queued outbound messages and take incoming queued messages
-    /// and forward them to their local target recipient(s)
     pub fn send_and_receive(
         &mut self,
-        inboxes: &mut [Option<Inbox>],
+        classes: &mut [Option<Class>],
         implementors: &mut [Option<Vec<ShortTypeId>>],
     ) {
         self.connect();
@@ -220,7 +207,7 @@ impl Networking {
             let closed_reason = if let Some(ref mut connection) = *maybe_connection {
                 match connection
                     .try_send_pending()
-                    .and_then(|_| connection.try_receive(inboxes, implementors))
+                    .and_then(|_| connection.try_receive(classes, implementors))
                 {
                     Ok(()) => None,
                     Err(err) => Some(err),
@@ -258,7 +245,6 @@ impl Networking {
         }
     }
 
-    /// Enqueue a new (potentially) outbound packet
     pub fn enqueue<M: Message>(&mut self, message_type_id: ShortTypeId, mut packet: Packet<M>) {
         if self.network.len() == 1 {
             return;
@@ -295,8 +281,6 @@ impl Networking {
         ::std::mem::forget(packet);
     }
 
-    /// Return a debug message containing the current local view of
-    /// network turn progress of all peers in the network
     pub fn debug_all_n_turns(&self) -> HashMap<MachineID, isize> {
         self.network_connections
             .iter()
@@ -403,14 +387,14 @@ impl Connection {
 
     pub fn try_receive(
         &mut self,
-        inboxes: &mut [Option<Inbox>],
+        classes: &mut [Option<Class>],
         implementors: &mut [Option<Vec<ShortTypeId>>],
     ) -> Result<(), ::tungstenite::Error> {
         loop {
             let blocked = match self.websocket.read_message() {
                 Ok(WebSocketMessage::Binary(data)) => dispatch_batch(
                     &data,
-                    inboxes,
+                    classes,
                     implementors,
                     &mut self.n_turns,
                     &mut self.n_turns_since_own_turn,
@@ -433,7 +417,7 @@ impl Connection {
 
 fn dispatch_batch(
     data: &[u8],
-    inboxes: &mut [Option<Inbox>],
+    classes: &mut [Option<Class>],
     implementors: &mut [Option<Vec<ShortTypeId>>],
     n_turns: &mut usize,
     n_turns_since_own_turn: &mut usize,
@@ -452,7 +436,7 @@ fn dispatch_batch(
         pos += ::std::mem::size_of::<u32>();
         let wants_to_wait = dispatch_message(
             &data[pos..(pos + message_size as usize)],
-            inboxes,
+            classes,
             implementors,
             n_turns,
             n_turns_since_own_turn,
@@ -467,7 +451,7 @@ fn dispatch_batch(
 
 fn dispatch_message(
     data: &[u8],
-    inboxes: &mut [Option<Inbox>],
+    classes: &mut [Option<Class>],
     implementors: &mut [Option<Vec<ShortTypeId>>],
     n_turns: &mut usize,
     n_turns_since_own_turn: &mut usize,
@@ -486,15 +470,15 @@ fn dispatch_message(
             (&data[::std::mem::size_of::<ShortTypeId>()] as *const u8) as *const RawID;
 
         unsafe {
-            if let Some(ref mut inbox) = inboxes[(*recipient_id).type_id.as_usize()] {
-                inbox.put_raw(&data);
+            if let Some(ref mut class) = classes[(*recipient_id).type_id.as_usize()] {
+                class.inbox.put_raw(&data);
             } else {
                 if let Some(implementors) =
                     implementors[(*recipient_id).type_id.as_usize()].as_ref()
                 {
                     for implementor_type_id in implementors {
-                        if let Some(inbox) = inboxes[implementor_type_id.as_usize()].as_mut() {
-                            inbox.put_raw(&data);
+                        if let Some(class) = classes[implementor_type_id.as_usize()].as_mut() {
+                            class.inbox.put_raw(&data);
                         } else {
                             panic!(
                                 "No inbox for actor type {}, trait type {} (coming from network)",
@@ -609,7 +593,7 @@ impl Connection {
 
     pub fn try_receive(
         &mut self,
-        inboxes: &mut [Option<Inbox>],
+        classes: &mut [Option<Class>],
         implementors: &mut [Option<Vec<ShortTypeId>>],
     ) -> Result<(), ::std::io::Error> {
         if let Ok(mut in_queue) = self.in_queue.try_borrow_mut() {
@@ -618,7 +602,7 @@ impl Connection {
                 //console!(log, "Before dispatch!");
                 dispatch_batch(
                     &batch,
-                    inboxes,
+                    classes,
                     implementors,
                     &mut self.n_turns,
                     &mut self.n_turns_since_own_turn,

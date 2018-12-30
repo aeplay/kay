@@ -3,33 +3,27 @@ use std::cell::Cell;
 
 // TODO: make this much more simple and just like a Box once we can move out of messages!
 
-/// An owning reference to local state outside the actor system that can safely be embedded in
-/// actor states and passed in messages, as long as they stay on one machine.
 pub struct External<T> {
     maybe_owned: Cell<Option<Box<T>>>,
 }
 
 impl<T> External<T> {
-    /// Allocate `content` on the heap and create a sharable `External` reference to it
     pub fn new(content: T) -> Self {
         External {
             maybe_owned: Cell::new(Some(Box::new(content))),
         }
     }
 
-    /// To interface with traditional owned boxes
     pub fn from_box(content: Box<T>) -> Self {
         External {
             maybe_owned: Cell::new(Some(content)),
         }
     }
 
-    /// Like `clone`, just to make the danger more clear
     pub fn steal(&self) -> Self {
         self.clone()
     }
 
-    /// To interface with traditional owned boxes
     pub fn into_box(self) -> Box<T> {
         self.maybe_owned
             .into_inner()

@@ -1,7 +1,7 @@
-use super::chunky;
-use super::compact::Compact;
-use super::messaging::{Message, Packet};
-use super::type_registry::{ShortTypeId, TypeRegistry};
+use crate::chunky;
+use crate::compact::Compact;
+use crate::messaging::{Message, Packet};
+use crate::type_registry::{ShortTypeId, TypeRegistry};
 
 pub struct Inbox {
     queue: chunky::Queue<chunky::HeapHandler>,
@@ -27,8 +27,7 @@ impl Inbox {
 
             // Write message type
             *(queue_ptr as *mut ShortTypeId) = message_registry.get::<M>();
-
-            let payload_ptr = queue_ptr.offset(::std::mem::size_of::<ShortTypeId>() as isize);
+            let payload_ptr = (queue_ptr as *mut u8).offset(::std::mem::size_of::<ShortTypeId>() as isize);
 
             // Write the packet into the queue
             Compact::compact_behind(&mut packet, payload_ptr as *mut Packet<M>);
@@ -44,7 +43,7 @@ impl Inbox {
         unsafe {
             let queue_ptr = self.queue.enqueue(buf.len());
 
-            ::std::ptr::copy_nonoverlapping(&buf[0], queue_ptr, buf.len())
+            ::std::ptr::copy_nonoverlapping(&buf[0], queue_ptr as *mut u8, buf.len())
         }
     }
 
@@ -62,7 +61,7 @@ pub struct InboxIterator<'a> {
 }
 
 pub struct DispatchablePacket {
-    pub message_type: super::type_registry::ShortTypeId,
+    pub message_type: ShortTypeId,
     pub packet_ptr: *const (),
 }
 
@@ -80,7 +79,7 @@ impl<'a> Iterator for InboxIterator<'a> {
                     .dequeue()
                     .expect("should have something left for sure");
                 let message_type = *(ptr as *mut ShortTypeId);
-                let payload_ptr = ptr.offset(::std::mem::size_of::<ShortTypeId>() as isize);
+                let payload_ptr = (ptr as *mut u8).offset(::std::mem::size_of::<ShortTypeId>() as isize);
                 self.n_messages_to_read -= 1;
                 Some(DispatchablePacket {
                     message_type,

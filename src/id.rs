@@ -1,8 +1,7 @@
-use super::type_registry::ShortTypeId;
-use super::World;
-use actor::ActorOrActorTrait;
+use crate::type_registry::ShortTypeId;
+use crate::actor_system::World;
+use crate::actor::ActorOrActorTrait;
 
-/// Identifies a machine in the network
 #[cfg_attr(
     feature = "serde-serialization",
     derive(Serialize, Deserialize)
@@ -10,21 +9,11 @@ use actor::ActorOrActorTrait;
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
 pub struct MachineID(pub u8);
 
-/// A `RawID` uniquely identifies an `Actor`, or even a `Actor` within a `InstanceStore`
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct RawID {
-    /// Used to identify instances within a top-level `Actor`. The main use-case is
-    /// `InstanceStore` identifying and dispatching to its `Instances` using this field
     pub instance_id: u32,
-    /// An ID for the type of the identified `Actor`, used to dispatch messages
-    /// to the message handling functions registered for this type
     pub type_id: ShortTypeId,
-    /// ID of the machine (in a computing cluster or multiplayer environment)
-    /// that the identified `Actor` lives on
     pub machine: MachineID,
-    /// Allows safe reuse of a `RawID` after `Actor`/`Actor` death.
-    /// The version is incremented to make the new (otherwise identical) `RawID`
-    /// distinguishable from erroneous references to the `Actor`/`Actor` previously identified
     pub version: u8,
 }
 
@@ -37,7 +26,6 @@ pub fn broadcast_machine_id() -> MachineID {
 }
 
 impl RawID {
-    /// Create a new `RawID`
     pub fn new(type_id: ShortTypeId, instance_id: u32, machine: MachineID, version: u8) -> Self {
         RawID {
             type_id,
@@ -47,8 +35,6 @@ impl RawID {
         }
     }
 
-    /// Get a version of an actor `RawID` that signals that a message
-    /// should be delivered to all machine-local instances.
     pub fn local_broadcast(&self) -> RawID {
         RawID {
             instance_id: broadcast_instance_id(),
@@ -56,8 +42,6 @@ impl RawID {
         }
     }
 
-    /// Get a version of an actor `RawID` that signals that a message
-    /// should be delivered globally (to all instances on all machines).
     pub fn global_broadcast(&self) -> RawID {
         RawID {
             machine: broadcast_machine_id(),
@@ -65,12 +49,10 @@ impl RawID {
         }
     }
 
-    /// Check whether this `RawID` signals a local or global broadcast.
     pub fn is_broadcast(&self) -> bool {
         self.instance_id == broadcast_instance_id()
     }
 
-    /// Check whether this `RawID` signals specifically a global broadcast.
     pub fn is_global_broadcast(&self) -> bool {
         self.machine == broadcast_machine_id()
     }
@@ -191,43 +173,30 @@ impl<'de> ::serde::de::Deserialize<'de> for RawID {
     }
 }
 
-/// `TypedID` is a construct on top of a `RawID` that can refer
-/// to a specific kind of actor, or actor trait at compile time
 pub trait TypedID: Copy + Clone + Sized + ::std::fmt::Debug + ::std::hash::Hash {
-    /// The Actor or ActorTrait that TypedIDs of this kind refer to
     type Target: ActorOrActorTrait;
 
-    /// Get the underlying `RawID`
     fn as_raw(&self) -> RawID;
-    /// Get the underlying `RawID` as a string
     fn as_raw_string(&self) -> String {
         self.as_raw().to_string()
     }
-    /// Construct a new `TypedID` from a `RawID` - this implies knowledge
-    /// about the type of actor referenced by the `RawID`
     fn from_raw(raw: RawID) -> Self;
-    /// Construct a new `TypedID` from a `RawID` in string form - this implies knowledge
-    /// about the type of actor referenced by the `RawID`
     fn from_raw_str(raw_str: &str) -> Result<Self, ParseRawIDError> {
         Ok(Self::from_raw(raw_str.parse()?))
     }
 
-    /// Get the `TypedID` of the local first actor of this kind
     fn local_first(world: &mut World) -> Self {
         Self::from_raw(world.local_first::<Self::Target>())
     }
 
-    /// Get the `TypedID` of the global first actor of this kind
     fn global_first(world: &mut World) -> Self {
         Self::from_raw(world.global_first::<Self::Target>())
     }
 
-    /// Get the `TypedID` representing a local broadcast to actors of this type
     fn local_broadcast(world: &mut World) -> Self {
         Self::from_raw(world.local_broadcast::<Self::Target>())
     }
 
-    /// Get the `TypedID` representing a global broadcast to actors of this type
     fn global_broadcast(world: &mut World) -> Self {
         Self::from_raw(world.global_broadcast::<Self::Target>())
     }

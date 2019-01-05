@@ -109,20 +109,23 @@ impl InstanceStore {
     }
 
     pub fn receive_instance(&mut self, recipient_id: RawID, packet_ptr: *const (), world: &mut World, handler: &Box<Fn(*mut(), *const (), &mut World) -> Fate>, state_v_table: &ActorStateVTable) {
-        let actor = self.at_mut(
+        if let Some(actor) = self.at_mut(
             recipient_id.instance_id as usize,
             recipient_id.version,
-        ).expect("Actor not found");
-        let fate = handler(actor, packet_ptr, world);
-        let is_still_compact = (state_v_table.is_still_compact)(actor);
+        ) {
+            let fate = handler(actor, packet_ptr, world);
+            let is_still_compact = (state_v_table.is_still_compact)(actor);
 
-        match fate {
-            Fate::Live => {
-                if !is_still_compact {
-                    self.resize(recipient_id.instance_id as usize, &state_v_table);
+            match fate {
+                Fate::Live => {
+                    if !is_still_compact {
+                        self.resize(recipient_id.instance_id as usize, &state_v_table);
+                    }
                 }
+                Fate::Die => self.remove(recipient_id, &state_v_table),
             }
-            Fate::Die => self.remove(recipient_id, &state_v_table),
+        } else {
+            eprintln!("Could not find actor {}", recipient_id.format(world));
         }
     }
 

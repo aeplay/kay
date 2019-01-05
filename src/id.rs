@@ -56,6 +56,16 @@ impl RawID {
     pub fn is_global_broadcast(&self) -> bool {
         self.machine == broadcast_machine_id()
     }
+
+    pub fn format(&self, world: &mut World) -> String {
+        format!(
+            "{}_{:X}.{:X}@{:X}",
+            world.get_actor_name(self.type_id),
+            self.instance_id,
+            self.version,
+            self.machine.0
+        )
+    }
 }
 
 impl ::std::fmt::Debug for RawID {

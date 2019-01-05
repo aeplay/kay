@@ -293,4 +293,9 @@ impl World {
         let system: &mut ActorSystem = unsafe { &mut *self.0 };
         system.shutting_down = true;
     }
+
+    pub fn get_actor_name(&mut self, type_id: ShortTypeId) -> &str {
+        let system: &mut ActorSystem = unsafe { &mut *self.0 };
+        system.actor_registry.get_name(type_id)
+    }
 }

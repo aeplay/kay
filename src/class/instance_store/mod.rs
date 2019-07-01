@@ -19,8 +19,7 @@ pub struct InstanceStore {
 const CHUNK_SIZE: usize = 1024 * 1024 * 16;
 
 impl InstanceStore {
-    pub fn new(type_name: &'static str, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>) -> InstanceStore {
-        let ident: chunky::Ident = type_name.into();
+    pub fn new(ident: &chunky::Ident, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>) -> InstanceStore {
         InstanceStore {
                 instances: chunky::MultiArena::new(
                     ident.sub("instances"),

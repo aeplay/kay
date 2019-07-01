@@ -29,6 +29,7 @@ impl ActorSystem {
         Self::new_with_storage(networking, Rc::new(chunky::HeapStorage))
     }
 
+    #[cfg(feature = "server")]
     pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(networking: Networking, directory: &P) -> ActorSystem {
         Self::new_with_storage(networking, Rc::new(chunky::MmapStorage{directory: directory.as_ref().to_owned()}))
     }

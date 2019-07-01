@@ -7,6 +7,7 @@ use crate::type_registry::{ShortTypeId, TypeRegistry};
 
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::rc::Rc;
 
 const MAX_RECIPIENT_TYPES: usize = 64;
 pub const MAX_MESSAGE_TYPES: usize = 256;
@@ -20,10 +21,19 @@ pub struct ActorSystem {
     trait_implementors: [Option<Vec<ShortTypeId>>; MAX_RECIPIENT_TYPES],
     message_statistics: [usize; MAX_MESSAGE_TYPES],
     networking: Networking,
+    storage: Rc<dyn chunky::ChunkStorage>
 }
 
 impl ActorSystem {
     pub fn new(networking: Networking) -> ActorSystem {
+        Self::new_with_storage(networking, Rc::new(chunky::HeapStorage))
+    }
+
+    pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(networking: Networking, directory: &P) -> ActorSystem {
+        Self::new_with_storage(networking, Rc::new(chunky::MmapStorage{directory: directory.as_ref().to_owned()}))
+    }
+
+    pub fn new_with_storage(networking: Networking, storage: Rc<dyn chunky::ChunkStorage>) -> ActorSystem {
         ActorSystem {
             panic_happened: false,
             shutting_down: false,
@@ -33,6 +43,7 @@ impl ActorSystem {
             classes: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
             message_statistics: [0; MAX_MESSAGE_TYPES],
             networking,
+            storage
         }
     }
 
@@ -42,7 +53,7 @@ impl ActorSystem {
         // ...but still make sure it is only added once
         assert!(self.classes[actor_id.as_usize()].is_none());
         // Store pointer to the actor
-        let class = Class::new(ActorVTable::new_for_actor_type::<A>());
+        let class = Class::new(ActorVTable::new_for_actor_type::<A>(), Rc::clone(&self.storage));
         self.classes[actor_id.as_usize()] = Some(class);
     }
 
@@ -86,7 +97,7 @@ impl ActorSystem {
         let actor_id = self.actor_registry.get::<A>();
         let message_id = self.message_registry.get_or_register::<M>();
         let class = self.classes[actor_id.as_usize()].as_mut().expect("Actor not added yet");
-        class.add_spawner(message_id, constructor, critical);        
+        class.add_spawner(message_id, constructor, critical);
     }
 
     pub fn send<M: Message>(&mut self, recipient: RawID, message: M) {

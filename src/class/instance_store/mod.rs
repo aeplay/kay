@@ -1,32 +1,35 @@
+use crate::messaging::HandlerFnRef;
 use crate::actor_system::{World};
 use chunky;
 use crate::id::RawID;
 use crate::messaging::Fate;
 use super::ActorStateVTable;
 use compact::Compact;
+use ::std::rc::Rc;
 
 mod slot_map;
 use self::slot_map::{SlotMap, SlotIndices};
 
 pub struct InstanceStore {
-    instances: chunky::MultiArena<chunky::HeapHandler>,
+    instances: chunky::MultiArena,
     slot_map: SlotMap,
-    pub n_instances: chunky::Value<usize, chunky::HeapHandler>,
+    pub n_instances: chunky::Value<usize>,
 }
 
 const CHUNK_SIZE: usize = 1024 * 1024 * 16;
 
 impl InstanceStore {
-    pub fn new(type_name: &'static str, typical_size: usize) -> InstanceStore {
+    pub fn new(type_name: &'static str, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>) -> InstanceStore {
         let ident: chunky::Ident = type_name.into();
         InstanceStore {
                 instances: chunky::MultiArena::new(
                     ident.sub("instances"),
                     CHUNK_SIZE,
                     typical_size,
+                    Rc::clone(&storage)
                 ),
-                n_instances: chunky::Value::load_or_default(ident.sub("n_instances"), 0),
-                slot_map: SlotMap::new(&ident.sub("slot_map")),
+                n_instances: chunky::Value::load_or_default(ident.sub("n_instances"), 0, Rc::clone(&storage)),
+                slot_map: SlotMap::new(&ident.sub("slot_map"), storage),
             }
     }
 
@@ -108,7 +111,7 @@ impl InstanceStore {
         self.swap_remove(old_i, state_v_table)
     }
 
-    pub fn receive_instance(&mut self, recipient_id: RawID, packet_ptr: *const (), world: &mut World, handler: &Box<Fn(*mut(), *const (), &mut World) -> Fate>, state_v_table: &ActorStateVTable) {
+    pub fn receive_instance(&mut self, recipient_id: RawID, packet_ptr: *const (), world: &mut World, handler: &Box<HandlerFnRef>, state_v_table: &ActorStateVTable) {
         if let Some(actor) = self.at_mut(
             recipient_id.instance_id as usize,
             recipient_id.version,
@@ -129,7 +132,7 @@ impl InstanceStore {
         }
     }
 
-    pub fn receive_broadcast(&mut self, packet_ptr: *const (), world: &mut World, handler: &Box<Fn(*mut(), *const (), &mut World) -> Fate>, state_v_table: &ActorStateVTable) {
+    pub fn receive_broadcast(&mut self, packet_ptr: *const (), world: &mut World, handler: &Box<HandlerFnRef>, state_v_table: &ActorStateVTable) {
     // this function has to deal with the fact that during the iteration,
     // receivers of the broadcast can be resized
     // and thus removed from a bin, swapping in either

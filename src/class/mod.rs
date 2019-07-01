@@ -1,3 +1,4 @@
+use crate::messaging::HandlerFnRef;
 use crate::messaging::Message;
 use crate::actor::Actor;
 use crate::type_registry::ShortTypeId;
@@ -5,6 +6,7 @@ use crate::actor_system::{World, MAX_MESSAGE_TYPES};
 use crate::id::{broadcast_instance_id, RawID, TypedID};
 use crate::messaging::{Fate, Packet};
 use compact::Compact;
+use std::rc::Rc;
 
 mod instance_store;
 use self::instance_store::InstanceStore;
@@ -24,12 +26,12 @@ pub struct ActorVTable {
 }
 
 pub struct ActorStateVTable {
-    pub is_still_compact: Box<Fn(*const ()) -> bool>,
-    pub total_size_bytes: Box<Fn(*const ()) -> usize>,
-    pub compact_behind: Box<Fn(*mut (), *mut ())>,
-    pub drop: Box<Fn(*mut ())>,
-    pub get_raw_id: Box<Fn(*const ()) -> RawID>,
-    pub set_raw_id: Box<Fn(*mut (), RawID)>,
+    pub is_still_compact: Box<dyn Fn(*const ()) -> bool>,
+    pub total_size_bytes: Box<dyn Fn(*const ()) -> usize>,
+    pub compact_behind: Box<dyn Fn(*mut (), *mut ())>,
+    pub drop: Box<dyn Fn(*mut ())>,
+    pub get_raw_id: Box<dyn Fn(*const ()) -> RawID>,
+    pub set_raw_id: Box<dyn Fn(*mut (), RawID)>,
     pub typical_size: usize
 }
 
@@ -54,15 +56,15 @@ impl ActorVTable {
 
 pub enum MessageHandler {
     Unassigned,
-    OnMessage{handler: Box<Fn(*mut(), *const (), &mut World) -> Fate>, critical: bool},
-    OnSpawn{spawner: Box<Fn(*const (), &mut World, &mut InstanceStore, &ActorStateVTable)>, critical: bool}
+    OnMessage{handler: Box<HandlerFnRef>, critical: bool},
+    OnSpawn{spawner: Box<dyn Fn(*const (), &mut World, &mut InstanceStore, &ActorStateVTable)>, critical: bool}
 }
 
 impl Class {
-    pub fn new(v_table: ActorVTable) -> Self {
+    pub fn new(v_table: ActorVTable, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
         Class {
-            instance_store: InstanceStore::new(v_table.type_name, v_table.state_v_table.typical_size),
-            inbox: Inbox::new(&::chunky::Ident::from(v_table.type_name).sub("inbox")),
+            instance_store: InstanceStore::new(v_table.type_name, v_table.state_v_table.typical_size, Rc::clone(&storage)),
+            inbox: Inbox::new(&::chunky::Ident::from(v_table.type_name).sub("inbox"), storage),
             v_table,
         }
     }
@@ -117,10 +119,10 @@ impl Class {
         message_type: ShortTypeId,
         packet_ptr: *const (),
         world: &mut World,
-    ) 
+    )
     {
         let handler_kind = &v_table.message_handlers[message_type.as_usize()];
-        
+
         if let MessageHandler::OnMessage{ref handler, critical} = handler_kind {
             if *critical || !world.panic_happened() {
                 let recipient_id = unsafe {(*(packet_ptr as *const Packet<()>)).recipient_id};

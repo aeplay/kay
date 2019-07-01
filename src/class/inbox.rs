@@ -1,18 +1,19 @@
-use crate::chunky;
-use crate::compact::Compact;
+use chunky;
+use compact::Compact;
 use crate::messaging::{Message, Packet};
 use crate::type_registry::{ShortTypeId, TypeRegistry};
+use ::std::rc::Rc;
 
 pub struct Inbox {
-    queue: chunky::Queue<chunky::HeapHandler>,
+    queue: chunky::Queue,
 }
 
 const CHUNK_SIZE: usize = 1024 * 1024 * 4; // 64MB
 
 impl Inbox {
-    pub fn new(ident: &chunky::Ident) -> Self {
+    pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
         Inbox {
-            queue: chunky::Queue::new(ident, CHUNK_SIZE),
+            queue: chunky::Queue::new(ident, CHUNK_SIZE, storage),
         }
     }
 
@@ -20,7 +21,7 @@ impl Inbox {
         let packet_size = packet.total_size_bytes();
         let total_size = ::std::mem::size_of::<ShortTypeId>() + packet_size;
 
-        #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
+        #[allow(clippy::cast_ptr_alignment)]
         unsafe {
             // "Allocate" the space in the queue
             let queue_ptr = self.queue.enqueue(total_size);
@@ -56,7 +57,7 @@ impl Inbox {
 }
 
 pub struct InboxIterator<'a> {
-    queue: &'a mut chunky::Queue<chunky::HeapHandler>,
+    queue: &'a mut chunky::Queue,
     n_messages_to_read: usize,
 }
 
@@ -72,7 +73,7 @@ impl<'a> Iterator for InboxIterator<'a> {
         if self.n_messages_to_read == 0 {
             None
         } else {
-            #[cfg_attr(feature = "cargo-clippy", allow(cast_ptr_alignment))]
+            #[allow(clippy::cast_ptr_alignment)]
             unsafe {
                 let ptr = self
                     .queue

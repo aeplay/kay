@@ -1,6 +1,5 @@
 use crate::class::Class;
 use crate::id::{broadcast_machine_id, MachineID, RawID};
-use crate::class::inbox::Inbox;
 use crate::messaging::{Message, Packet};
 use crate::type_registry::ShortTypeId;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -183,7 +182,7 @@ impl Networking {
             if let Some(ref mut connection) = *maybe_connection {
                 // write turn end, use 0 as "message type" to distinguish from actual packet
                 {
-                    let mut data = connection.enqueue_in_batch(
+                    let data = connection.enqueue_in_batch(
                         ::std::mem::size_of::<ShortTypeId>() + ::std::mem::size_of::<u32>(),
                     );
                     data.write_u16::<LittleEndian>(0).unwrap();
@@ -262,7 +261,7 @@ impl Networking {
 
         for machine_id in recipients {
             if let Some(connection) = self.network_connections[machine_id].as_mut() {
-                let mut data = connection.enqueue_in_batch(total_size);
+                let data = connection.enqueue_in_batch(total_size);
                 data.write_u16::<LittleEndian>(message_type_id.into())
                     .unwrap();
                 let packet_pos = data.len();

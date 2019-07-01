@@ -1,4 +1,5 @@
-use super::chunky;
+use chunky;
+use std::rc::Rc;
 
 #[derive(Clone, Copy)]
 pub struct SlotIndices {
@@ -43,17 +44,17 @@ impl From<chunky::MultiArenaIndex> for SlotIndices {
 }
 
 pub struct SlotMap {
-    entries: chunky::Vector<SlotIndices, chunky::HeapHandler>,
-    last_known_version: chunky::Vector<u8, chunky::HeapHandler>,
-    free_ids_with_versions: chunky::Vector<(usize, usize), chunky::HeapHandler>,
+    entries: chunky::Vector<SlotIndices>,
+    last_known_version: chunky::Vector<u8>,
+    free_ids_with_versions: chunky::Vector<(usize, usize)>,
 }
 
 impl SlotMap {
-    pub fn new(ident: &chunky::Ident) -> Self {
+    pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
         SlotMap {
-            entries: chunky::Vector::new(ident.sub("entries"), 1024 * 1024),
-            last_known_version: chunky::Vector::new(ident.sub("last_known_version"), 1024 * 1024),
-            free_ids_with_versions: chunky::Vector::new(ident.sub("free_ids_with_versions"), 1024),
+            entries: chunky::Vector::new(ident.sub("entries"), 1024 * 1024, Rc::clone(&storage)),
+            last_known_version: chunky::Vector::new(ident.sub("last_known_version"), 1024 * 1024, Rc::clone(&storage)),
+            free_ids_with_versions: chunky::Vector::new(ident.sub("free_ids_with_versions"), 1024, storage),
         }
     }
 

@@ -1,5 +1,6 @@
 use super::compact::Compact;
 use super::id::RawID;
+use super::World;
 
 pub enum Fate {
     Live,
@@ -8,6 +9,8 @@ pub enum Fate {
 
 pub trait Message: Compact + 'static {}
 impl<T: Compact + 'static> Message for T {}
+
+pub type HandlerFnRef = dyn Fn(*mut(), *const (), &mut World) -> Fate;
 
 #[derive(Compact, Clone)]
 #[repr(C)]

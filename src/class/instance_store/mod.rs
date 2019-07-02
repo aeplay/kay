@@ -62,7 +62,7 @@ impl InstanceStore {
         let (slot_ptr, index) = self.instances.push(size);
 
         self.slot_map
-            .associate(id.instance_id as usize, SlotIndices::new(index.0, (index.1).0, id.version));
+            .associate(id.instance_id as usize, index.into());
 
         (state_v_table.compact_behind)(initial_state, slot_ptr as *mut ());
     }
@@ -70,11 +70,8 @@ impl InstanceStore {
     fn swap_remove(&mut self, indices: SlotIndices, state_v_table: &ActorStateVTable) -> bool {
         match self.instances.swap_remove_within_bin(indices.into()) {
             Some(swapped_actor) => {
-                let swapped_actor_id = (state_v_table.get_raw_id)(swapped_actor as *const ());
                 self.slot_map
-                    .associate(
-                        swapped_actor_id.instance_id as usize,
-                        SlotIndices::new(indices.bin(), indices.slot(), swapped_actor_id.version));
+                    .associate((state_v_table.get_raw_id)(swapped_actor as *const ()).instance_id as usize, indices);
                 true
             }
             None => false,
@@ -95,7 +92,7 @@ impl InstanceStore {
         (state_v_table.drop)(old_actor_ptr);
         self.swap_remove(i, state_v_table);
         self.slot_map
-            .free(id.instance_id as usize, id.version);
+            .free(id.instance_id as usize, id.version as usize);
         *self.n_instances -= 1;
     }
 
@@ -151,7 +148,7 @@ impl InstanceStore {
         let mut index_after_last_recipient = recipients_todo;
 
         for _ in 0..recipients_todo {
-            let index = SlotIndices::artificial(bin_index, slot);
+            let index = SlotIndices::new(bin_index, slot);
             let (fate, is_still_compact, id) = {
                 let actor = self.at_index_mut(index);
                 let fate = handler(actor, packet_ptr, world);

@@ -8,7 +8,7 @@ pub struct Inbox {
     queue: chunky::Queue,
 }
 
-const CHUNK_SIZE: usize = 16 * 1024; // 4 * 4kb pages
+const CHUNK_SIZE: usize = 64 * 1024; // 64kb pages
 
 impl Inbox {
     pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>) -> Self {

@@ -62,10 +62,12 @@ pub enum MessageHandler {
 
 impl Class {
     pub fn new(v_table: ActorVTable, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
-        let ident: chunky::Ident = v_table.type_name.replace("::", "-").replace("<", "(").replace(">", ")").into();
+        let ident: chunky::Ident = v_table.type_name.split("<").map(|piece|
+            piece.split("::").last().unwrap_or("")
+        ).collect::<Vec<_>>().join("<").replace("<", "(").replace(">", ")").into();
         Class {
             instance_store: InstanceStore::new(&ident, v_table.state_v_table.typical_size, Rc::clone(&storage)),
-            inbox: Inbox::new(&ident.sub("inbox"), storage),
+            inbox: Inbox::new(&ident.sub("inbx"), storage),
             v_table,
         }
     }

@@ -37,7 +37,7 @@ impl ActorSystem {
     /// Create a new actor system that lives in memory and is persisted to disk using Mmapping
     #[cfg(feature = "server")]
     pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(networking: Networking, directory: &P) -> ActorSystem {
-        Self::new_with_storage(networking, Rc::new(chunky::MmapStorage{directory: directory.as_ref().to_owned()}))
+        Self::new_with_storage(networking, Rc::new(chunky::MmapStorage::new(directory.as_ref().to_owned())))
     }
 
     /// Create a new actor system backed by any `chunky::ChunkStorage`

@@ -16,19 +16,19 @@ pub struct InstanceStore {
     pub n_instances: chunky::Value<usize>,
 }
 
-const CHUNK_SIZE: usize = 16 * 1024; // 4 * 4kb pages
+const CHUNK_SIZE: usize = 64 * 1024; // 64kb pages
 
 impl InstanceStore {
     pub fn new(ident: &chunky::Ident, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>) -> InstanceStore {
         InstanceStore {
                 instances: chunky::MultiArena::new(
-                    ident.sub("instances"),
+                    ident.sub("inst"),
                     CHUNK_SIZE,
                     typical_size,
                     Rc::clone(&storage)
                 ),
-                n_instances: chunky::Value::load_or_default(ident.sub("n_instances"), 0, Rc::clone(&storage)),
-                slot_map: SlotMap::new(&ident.sub("slot_map"), storage),
+                n_instances: chunky::Value::load_or_default(ident.sub("n"), 0, Rc::clone(&storage)),
+                slot_map: SlotMap::new(&ident.sub("slts"), storage),
             }
     }
 
@@ -62,7 +62,7 @@ impl InstanceStore {
         let (slot_ptr, index) = self.instances.push(size);
 
         self.slot_map
-            .associate(id.instance_id as usize, index.into());
+            .associate(id.instance_id as usize, SlotIndices::new(index.0, (index.1).0, id.version));
 
         (state_v_table.compact_behind)(initial_state, slot_ptr as *mut ());
     }
@@ -70,8 +70,11 @@ impl InstanceStore {
     fn swap_remove(&mut self, indices: SlotIndices, state_v_table: &ActorStateVTable) -> bool {
         match self.instances.swap_remove_within_bin(indices.into()) {
             Some(swapped_actor) => {
+                let swapped_actor_id = (state_v_table.get_raw_id)(swapped_actor as *const ());
                 self.slot_map
-                    .associate((state_v_table.get_raw_id)(swapped_actor as *const ()).instance_id as usize, indices);
+                    .associate(
+                        swapped_actor_id.instance_id as usize,
+                        SlotIndices::new(indices.bin(), indices.slot(), swapped_actor_id.version));
                 true
             }
             None => false,
@@ -92,7 +95,7 @@ impl InstanceStore {
         (state_v_table.drop)(old_actor_ptr);
         self.swap_remove(i, state_v_table);
         self.slot_map
-            .free(id.instance_id as usize, id.version as usize);
+            .free(id.instance_id as usize, id.version);
         *self.n_instances -= 1;
     }
 
@@ -148,7 +151,7 @@ impl InstanceStore {
         let mut index_after_last_recipient = recipients_todo;
 
         for _ in 0..recipients_todo {
-            let index = SlotIndices::new(bin_index, slot);
+            let index = SlotIndices::artificial(bin_index, slot);
             let (fate, is_still_compact, id) = {
                 let actor = self.at_index_mut(index);
                 let fate = handler(actor, packet_ptr, world);

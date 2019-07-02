@@ -24,10 +24,6 @@ fn main() {
 
         system.process_all_messages();
 
-        if system.shutting_down || system.panic_happened {
-            break;
-        }
-
         system.networking_finish_turn();
     }
 }

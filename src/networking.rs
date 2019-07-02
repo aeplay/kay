@@ -20,9 +20,12 @@ use tungstenite::{
 };
 #[cfg(feature = "server")]
 use url::Url;
+/// Represents a networking configuration, topology and state of an `ActorSystem`
 pub struct Networking {
+    /// The machine ID of the local actor system
     pub machine_id: MachineID,
     batch_message_bytes: usize,
+    /// The progress of networking turns of the local actor system
     pub n_turns: usize,
     acceptable_turn_distance: usize,
     skip_turns_per_turn_head: usize,
@@ -33,6 +36,7 @@ pub struct Networking {
 }
 
 impl Networking {
+    /// Configure a new `Networking`
     pub fn new(
         machine_id: u8,
         network: Vec<String>,
@@ -61,7 +65,7 @@ impl Networking {
     }
 
     #[cfg(feature = "server")]
-    pub fn connect(&mut self) {
+    pub(crate) fn connect(&mut self) {
         // first wait for a larger machine_id to connect
         if self
             .network_connections
@@ -162,7 +166,7 @@ impl Networking {
         }
     }
 
-    pub fn finish_turn(&mut self) -> Option<usize> {
+    pub(crate) fn finish_turn(&mut self) -> Option<usize> {
         let mut maybe_skip_turns = None;
 
         for maybe_connection in &mut self.network_connections {
@@ -195,7 +199,7 @@ impl Networking {
         maybe_skip_turns
     }
 
-    pub fn send_and_receive(
+    pub(crate) fn send_and_receive(
         &mut self,
         classes: &mut [Option<Class>],
         implementors: &mut [Option<Vec<ShortTypeId>>],
@@ -244,7 +248,7 @@ impl Networking {
         }
     }
 
-    pub fn enqueue<M: Message>(&mut self, message_type_id: ShortTypeId, mut packet: Packet<M>) {
+    pub(crate) fn enqueue<M: Message>(&mut self, message_type_id: ShortTypeId, mut packet: Packet<M>) {
         if self.network.len() == 1 {
             return;
         }
@@ -280,7 +284,7 @@ impl Networking {
         ::std::mem::forget(packet);
     }
 
-    pub fn debug_all_n_turns(&self) -> HashMap<MachineID, isize> {
+    pub(crate) fn debug_all_n_turns(&self) -> HashMap<MachineID, isize> {
         self.network_connections
             .iter()
             .enumerate()

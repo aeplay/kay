@@ -3,27 +3,39 @@ use std::cell::Cell;
 
 // TODO: make this much more simple and just like a Box once we can move out of messages!
 
+/// A Marker for state of an actor instance that is not managed by the actor system.
+/// As such it will not be compacted, **nor persisted**.
+/// External implements clone, so it can be used in actor state, but **you have to ensure
+/// at runtime** that only one actor or message ever holds onto an external.
+/// Any attempt to access the external from two different places will throw (see `steal`).
 pub struct External<T> {
     maybe_owned: Cell<Option<Box<T>>>,
 }
 
 impl<T> External<T> {
+    /// Create a new `External` holding the given content
     pub fn new(content: T) -> Self {
         External {
             maybe_owned: Cell::new(Some(Box::new(content))),
         }
     }
 
+    /// Create a new `External` directly from a `Box` holding the given content
     pub fn from_box(content: Box<T>) -> Self {
         External {
             maybe_owned: Cell::new(Some(content)),
         }
     }
 
+    /// A more explicit way to clone an External,
+    /// which effectively takes the held value out of the old external.
+    /// Stealing or cloning twice from the same external will throw.
     pub fn steal(&self) -> Self {
         self.clone()
     }
 
+    /// Take the content out of the external, as a `Box`.
+    /// This, like stealing/cloning can only be done once.
     pub fn into_box(self) -> Box<T> {
         self.maybe_owned
             .into_inner()

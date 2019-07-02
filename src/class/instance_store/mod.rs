@@ -16,7 +16,7 @@ pub struct InstanceStore {
     pub n_instances: chunky::Value<usize>,
 }
 
-const CHUNK_SIZE: usize = 1024 * 1024 * 16;
+const CHUNK_SIZE: usize = 16 * 1024; // 4 * 4kb pages
 
 impl InstanceStore {
     pub fn new(ident: &chunky::Ident, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>) -> InstanceStore {

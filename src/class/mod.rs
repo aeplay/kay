@@ -5,6 +5,7 @@ use crate::type_registry::ShortTypeId;
 use crate::actor_system::{World, MAX_MESSAGE_TYPES};
 use crate::id::{broadcast_instance_id, RawID, TypedID};
 use crate::messaging::{Fate, Packet};
+use crate::tuning::Tuning;
 use compact::Compact;
 use std::rc::Rc;
 
@@ -61,13 +62,13 @@ pub enum MessageHandler {
 }
 
 impl Class {
-    pub fn new(v_table: ActorVTable, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
+    pub fn new(v_table: ActorVTable, storage: Rc<dyn chunky::ChunkStorage>, tuning: &Tuning) -> Self {
         let ident: chunky::Ident = v_table.type_name.split("<").map(|piece|
             piece.split("::").last().unwrap_or("")
         ).collect::<Vec<_>>().join("<").replace("<", "(").replace(">", ")").into();
         Class {
-            instance_store: InstanceStore::new(&ident, v_table.state_v_table.typical_size, Rc::clone(&storage)),
-            inbox: Inbox::new(&ident.sub("inbx"), storage),
+            instance_store: InstanceStore::new(&ident, v_table.state_v_table.typical_size, Rc::clone(&storage), tuning),
+            inbox: Inbox::new(&ident.sub("inbx"), storage, tuning),
             v_table,
         }
     }

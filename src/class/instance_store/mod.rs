@@ -1,5 +1,6 @@
 use crate::messaging::HandlerFnRef;
 use crate::actor_system::{World};
+use crate::tuning::Tuning;
 use chunky;
 use crate::id::RawID;
 use crate::messaging::Fate;
@@ -16,19 +17,17 @@ pub struct InstanceStore {
     pub n_instances: chunky::Value<usize>,
 }
 
-const CHUNK_SIZE: usize = 64 * 1024; // 64kb pages
-
 impl InstanceStore {
-    pub fn new(ident: &chunky::Ident, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>) -> InstanceStore {
+    pub fn new(ident: &chunky::Ident, typical_size: usize, storage: Rc<dyn chunky::ChunkStorage>, tuning: &Tuning) -> InstanceStore {
         InstanceStore {
                 instances: chunky::MultiArena::new(
                     ident.sub("inst"),
-                    CHUNK_SIZE,
+                    tuning.instance_chunk_size,
                     typical_size,
                     Rc::clone(&storage)
                 ),
                 n_instances: chunky::Value::load_or_default(ident.sub("n"), 0, Rc::clone(&storage)),
-                slot_map: SlotMap::new(&ident.sub("slts"), storage),
+                slot_map: SlotMap::new(&ident.sub("slts"), storage, tuning),
             }
     }
 

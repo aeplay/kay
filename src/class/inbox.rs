@@ -2,18 +2,17 @@ use chunky;
 use compact::Compact;
 use crate::messaging::{Message, Packet};
 use crate::type_registry::{ShortTypeId, TypeRegistry};
+use crate::tuning::Tuning;
 use ::std::rc::Rc;
 
 pub struct Inbox {
     queue: chunky::Queue,
 }
 
-const CHUNK_SIZE: usize = 64 * 1024; // 64kb pages
-
 impl Inbox {
-    pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
+    pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>, tuning: &Tuning) -> Self {
         Inbox {
-            queue: chunky::Queue::new(ident, CHUNK_SIZE, storage),
+            queue: chunky::Queue::new(ident, tuning.inbox_queue_chunk_size, storage),
         }
     }
 

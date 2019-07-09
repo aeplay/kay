@@ -1,5 +1,6 @@
 use chunky;
 use std::rc::Rc;
+use crate::tuning::Tuning;
 
 #[derive(Clone, Copy)]
 pub struct SlotIndices {
@@ -50,11 +51,11 @@ pub struct SlotMap {
 }
 
 impl SlotMap {
-    pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>) -> Self {
+    pub fn new(ident: &chunky::Ident, storage: Rc<dyn chunky::ChunkStorage>, tuning: &Tuning) -> Self {
         SlotMap {
-            entries: chunky::Vector::new(ident.sub("entr"), 1024 * 1024, Rc::clone(&storage)),
-            last_known_version: chunky::Vector::new(ident.sub("vrsns"), 1024 * 1024, Rc::clone(&storage)),
-            free_ids_with_versions: chunky::Vector::new(ident.sub("free"), 1024, storage),
+            entries: chunky::Vector::new(ident.sub("entr"), tuning.instance_entry_chunk_size, Rc::clone(&storage)),
+            last_known_version: chunky::Vector::new(ident.sub("vrsns"), tuning.instance_versions_chunk_size, Rc::clone(&storage)),
+            free_ids_with_versions: chunky::Vector::new(ident.sub("free"), tuning.instance_free_chunk_size, storage),
         }
     }
 

@@ -4,6 +4,7 @@ use crate::id::{MachineID, RawID};
 use crate::messaging::{Fate, Message, Packet};
 use crate::networking::Networking;
 use crate::type_registry::{ShortTypeId, TypeRegistry};
+use crate::tuning::Tuning;
 
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -25,23 +26,24 @@ pub struct ActorSystem {
     trait_implementors: [Option<Vec<ShortTypeId>>; MAX_RECIPIENT_TYPES],
     message_statistics: [usize; MAX_MESSAGE_TYPES],
     networking: Networking,
-    storage: Rc<dyn chunky::ChunkStorage>
+    storage: Rc<dyn chunky::ChunkStorage>,
+    tuning: Tuning
 }
 
 impl ActorSystem {
     /// Create a new actor system that lives in memory only
-    pub fn new(networking: Networking) -> ActorSystem {
-        Self::new_with_storage(networking, Rc::new(chunky::HeapStorage))
+    pub fn new(networking: Networking, tuning: Tuning) -> ActorSystem {
+        Self::new_with_storage(networking, Rc::new(chunky::HeapStorage), tuning)
     }
 
     /// Create a new actor system that lives in memory and is persisted to disk using Mmapping
     #[cfg(feature = "server")]
-    pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(networking: Networking, directory: &P) -> ActorSystem {
-        Self::new_with_storage(networking, Rc::new(chunky::MmapStorage::new(directory.as_ref().to_owned())))
+    pub fn new_mmap_persisted<P: AsRef<::std::path::Path>>(networking: Networking, directory: &P, tuning: Tuning) -> ActorSystem {
+        Self::new_with_storage(networking, Rc::new(chunky::MmapStorage::new(directory.as_ref().to_owned())), tuning)
     }
 
     /// Create a new actor system backed by any `chunky::ChunkStorage`
-    pub fn new_with_storage(networking: Networking, storage: Rc<dyn chunky::ChunkStorage>) -> ActorSystem {
+    pub fn new_with_storage(networking: Networking, storage: Rc<dyn chunky::ChunkStorage>, tuning: Tuning) -> ActorSystem {
         ActorSystem {
             panic_happened: false,
             trait_implementors: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
@@ -50,7 +52,8 @@ impl ActorSystem {
             classes: unsafe { make_array!(MAX_RECIPIENT_TYPES, |_| None) },
             message_statistics: [0; MAX_MESSAGE_TYPES],
             networking,
-            storage
+            storage,
+            tuning
         }
     }
 
@@ -61,7 +64,7 @@ impl ActorSystem {
         // ...but still make sure it is only added once
         assert!(self.classes[actor_id.as_usize()].is_none());
         // Store pointer to the actor
-        let class = Class::new(ActorVTable::new_for_actor_type::<A>(), Rc::clone(&self.storage));
+        let class = Class::new(ActorVTable::new_for_actor_type::<A>(), Rc::clone(&self.storage), &self.tuning);
         self.classes[actor_id.as_usize()] = Some(class);
     }
 

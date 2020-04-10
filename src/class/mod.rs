@@ -102,7 +102,7 @@ impl Class {
                 unsafe {
                     let packet = &*(packet_ptr as *const Packet<M>);
                     let mut instance = constructor(&packet.message, world);
-                    store.add(&mut instance as *mut A as *mut (), intrinsics);
+                    store.add(&mut instance as *mut A as *mut (), intrinsics, true);
                     ::std::mem::forget(instance);
                 }
             }),

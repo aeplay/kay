@@ -55,13 +55,15 @@ impl InstanceStore {
         )
     }
 
-    pub unsafe fn add(&mut self, initial_state: *mut (), state_v_table: &ActorStateVTable) {
+    pub unsafe fn add(&mut self, initial_state: *mut (), state_v_table: &ActorStateVTable, increment_n_instances: bool) {
         let id = (state_v_table.get_raw_id)(initial_state);
         let size = (state_v_table.total_size_bytes)(initial_state);
         let (slot_ptr, index) = self.instances.push(size);
 
         self.slot_map
             .associate(id.instance_id as usize, index.into());
+
+        if increment_n_instances {*self.n_instances += 1}
 
         (state_v_table.compact_behind)(initial_state, slot_ptr as *mut ());
     }
@@ -105,7 +107,7 @@ impl InstanceStore {
 
     fn resize_at_index(&mut self, old_i: SlotIndices, state_v_table: &ActorStateVTable) -> bool {
         let old_actor_ptr = self.at_index_mut(old_i);
-        unsafe { self.add(old_actor_ptr, state_v_table) };
+        unsafe { self.add(old_actor_ptr, state_v_table, false) };
         self.swap_remove(old_i, state_v_table)
     }
 

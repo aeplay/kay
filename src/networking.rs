@@ -73,7 +73,8 @@ impl Networking {
             .enumerate()
             .any(|(machine_id, connection)| {
                 machine_id > self.machine_id.0 as usize && connection.is_none()
-            }) {
+            })
+        {
             match self.listener.accept() {
                 Ok((stream, addr)) => {
                     println!("Got connection from {}, shaking hands...", addr);
@@ -97,13 +98,15 @@ impl Networking {
                                             break;
                                         }
                                         Ok(_) => {}
-                                        Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                                            println!(
-                                                "Error while expecting first message: {}",
-                                                real_err
-                                            );
-                                            break;
-                                        },
+                                        Err(e) => {
+                                            if let Some(real_err) = e.into_non_blocking() {
+                                                println!(
+                                                    "Error while expecting first message: {}",
+                                                    real_err
+                                                );
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
                                 break;
@@ -239,7 +242,8 @@ impl Networking {
                     } else {
                         0
                     }
-                }).max()
+                })
+                .max()
                 .unwrap_or(self.n_turns);
 
             if max_n_turns > 1000 + self.n_turns {
@@ -248,7 +252,11 @@ impl Networking {
         }
     }
 
-    pub(crate) fn enqueue<M: Message>(&mut self, message_type_id: ShortTypeId, mut packet: Packet<M>) {
+    pub(crate) fn enqueue<M: Message>(
+        &mut self,
+        message_type_id: ShortTypeId,
+        mut packet: Packet<M>,
+    ) {
         if self.network.len() == 1 {
             return;
         }
@@ -301,7 +309,8 @@ impl Networking {
                         }
                     },
                 )
-            }).collect()
+            })
+            .collect()
     }
 
     #[cfg(feature = "browser")]
@@ -346,6 +355,10 @@ impl Connection {
         //     unsafe{(*recipient_id)}, message
         // );
 
+        if message_size > self.batch_message_bytes {
+            panic!("Message size exceeds message batch size");
+        }
+
         let batch =
             if self.out_batches.last().unwrap().len() < self.batch_message_bytes - message_size {
                 self.out_batches.last_mut().unwrap()
@@ -369,9 +382,11 @@ impl Connection {
                 .write_message(WebSocketMessage::binary(batch))
             {
                 Ok(_) => {}
-                Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                    return Err(real_err);
-                },
+                Err(e) => {
+                    if let Some(real_err) = e.into_non_blocking() {
+                        return Err(real_err);
+                    }
+                }
             }
         }
 
@@ -380,11 +395,13 @@ impl Connection {
 
         match self.websocket.write_pending() {
             Ok(()) => Ok(()),
-            Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                Err(real_err)
-            } else {
-                Ok(())
-            },
+            Err(e) => {
+                if let Some(real_err) = e.into_non_blocking() {
+                    Err(real_err)
+                } else {
+                    Ok(())
+                }
+            }
         }
     }
 
@@ -403,11 +420,13 @@ impl Connection {
                     &mut self.n_turns_since_own_turn,
                 ),
                 Ok(other_message) => panic!("Got a non binary message: {:?}", other_message),
-                Err(e) => if let Some(real_err) = e.into_non_blocking() {
-                    return Err(real_err);
-                } else {
-                    true
-                },
+                Err(e) => {
+                    if let Some(real_err) = e.into_non_blocking() {
+                        return Err(real_err);
+                    } else {
+                        true
+                    }
+                }
             };
 
             if blocked {

@@ -38,3 +38,5 @@ It internally uses...
 - [X] A [Slot Map](http://seanmiddleditch.com/data-structures-for-game-developers-the-slot-map/) in `InstanceStore`s to assign unique `ID`s to instances, while always keeping them in continous memory chunks. This makes iterating over them for broadcast messages very fast.
 
 kay is inspired by Data-Oriented Game Development, Erlang and the original ideas behind Object-Orientedness. It is thus named after [Alan Kay](https://en.wikipedia.org/wiki/Alan_Kay).
+
+If you want to see a presentation, check out my Rustfest talk at YouTube called [Type-safe & high-perf disctributed actor systems with Rust](https://www.youtube.com/watch?v=qr9GTTST_Dk)

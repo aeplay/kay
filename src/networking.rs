@@ -156,7 +156,8 @@ impl Networking {
         for (machine_id, address) in self.network.iter().enumerate() {
             if machine_id != self.machine_id.0 as usize {
                 if self.network_connections[machine_id].is_none() {
-                    let websocket = WebSocket::new(&format!("ws://{}", address)).unwrap();
+                    let wsAddress = websocket_address(address);
+                    let websocket = WebSocket::new(&wsAddress).unwrap();
                     let mut connection = Some(Connection::new(websocket, self.batch_message_bytes));
                     connection
                         .as_mut()
@@ -317,6 +318,33 @@ impl Networking {
     pub fn main_out_connection(&self) -> Option<&Connection> {
         self.network_connections[0].as_ref()
     }
+}
+
+fn websocket_address(address: &str) -> String  {
+    let v: Vec<&str> = address.split("://").collect();
+    if v.len() == 1 {
+        format!("ws://{}", &v[0])
+    } else {
+        let rest = &v[1..].join("");
+        match v[0] {
+            "http" => format!("ws://{}", rest),
+            "https" => format!("wss://{}", rest),
+            "wss" => address.to_owned(),
+            "ws" => address.to_owned(),
+            _ => format!("ws://{}", rest)
+        }
+    }
+}
+
+#[test]
+fn test_websocket_address() {
+    assert_eq!(websocket_address("asd.as"), "ws://asd.as");
+    assert_eq!(websocket_address("://asd.as"), "ws://asd.as");
+    assert_eq!(websocket_address("://asd.as"), "ws://asd.as");
+    assert_eq!(websocket_address("ws://asd.as"), "ws://asd.as");
+    assert_eq!(websocket_address("wss://asd.as"), "wss://asd.as");
+    assert_eq!(websocket_address("http://asd.as"), "ws://asd.as");
+    assert_eq!(websocket_address("https://asd.as"), "wss://asd.as");
 }
 
 #[cfg(feature = "server")]
